@@ -366,7 +366,7 @@ input[type=file]{display:none}
     <div class="hero-content">
       <div class="hero-eyebrow">
         <span class="hero-eyebrow-dot"></span>
-        Fundación Hospital de Jove · v0.5 beta
+        Fundación Hospital de Jove · v0.7 beta
       </div>
       <h1>
         <span class="line"><span class="line-inner">Un documento,</span></span>
@@ -628,7 +628,7 @@ input[type=file]{display:none}
       </div>
     </div>
     <div class="footer-bottom">
-      <span>Isoforma · MVP v0.5</span>
+      <span>Isoforma · v0.7</span>
       <span>Fundación Hospital de Jove · 2026</span>
     </div>
     <div class="footer-signature">vibe coded with <span class="heart">&#9829;</span> by <em>Highkey Labs</em></div>
@@ -869,7 +869,13 @@ const WARNING_LABELS = {
   NUMBERING_MERGED_REMAPPED: 'Se fusionaron definiciones de viñetas — se renumeraron IDs del contenido para evitar colisión con las del referente.',
   NUMBERING_MERGE_FAILED: 'No se pudo fusionar numbering.xml; las viñetas o listas numeradas pueden no mantenerse.',
   STYLES_UNKNOWN_ID: 'Hay párrafos que referencian un estilo que no existe en styles.xml — Word los mostrará como "Normal".',
-  CLASSIFIER_LOW_CONFIDENCE: 'Algunos párrafos se clasificaron con baja confianza — revisa los títulos y subtítulos en la versión final.'
+  CLASSIFIER_LOW_CONFIDENCE: 'Algunos párrafos se clasificaron con baja confianza — revisa los títulos y subtítulos en la versión final.',
+  // Validador normativo PNT (Fase 7 — Bloque D)
+  NORMATIVA_ALL_CAPS_BODY: 'Hay párrafos de cuerpo escritos en MAYÚSCULAS — la normativa pide reservar las mayúsculas para títulos.',
+  NORMATIVA_UNDERLINE: 'Hay texto subrayado en el cuerpo — la normativa recomienda reservar el subrayado para hiperenlaces.',
+  NORMATIVA_EMPTY_LIST: 'Hay ítems de lista sin contenido — revísalos o elimínalos.',
+  NORMATIVA_MISSING_DATOS_GENERALES: 'No se encontró la tabla de "Datos generales" al inicio del PNT.',
+  NORMATIVA_FONT_NON_ARIAL: 'Hay runs con fuentes distintas de Arial en el cuerpo — la normativa exige Arial 10.'
 };
 
 function describeWarning(w) {
@@ -931,9 +937,16 @@ els.btnProcess.addEventListener('click', async () => {
     els.statSize.textContent = formatBytes(result.blob.size);
     els.statTime.textContent = elapsed + 's';
     const headerNote = s.preservedHeaders ? 'cabecera propia conservada' : 'cabecera del referente inyectada';
+    const trustNote = (typeof s.preservedStyles === 'number' && s.preservedStyles > 0)
+      ? ` · ${s.preservedStyles} estilos FHJ preservados`
+      : '';
+    const listNote = (typeof s.list === 'number' && s.list > 0)
+      ? ` · ${s.list} listas numeradas`
+      : '';
     els.resultMeta.textContent =
       `${headerNote} · ${s.title1} títulos · ${s.titPar} subtítulos · ${s.paragraph} párrafos · ` +
-      `${s.vignette} viñetas · ${s.tables} tablas · ${s.figures} figuras`;
+      `${s.vignette} viñetas${listNote} · ${s.tables} tablas · ${s.figures} figuras` +
+      trustNote;
 
     renderWarnings(state.warnings);
 

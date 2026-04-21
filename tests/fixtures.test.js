@@ -144,3 +144,71 @@ describe('Fixtures reales — caso B (Procedimiento analítico Cobas c303)', () 
     expect(integrity.errors).toEqual([]);
   });
 });
+
+// ----------------------------------------------------------------------------
+// Fase 7 — fixtures reales (gestion-info, recomendaciones, pnt-claude)
+// ----------------------------------------------------------------------------
+
+describe('Fase 7 — stress real: ref-gestion-info + content-pnt-claude', () => {
+  const refName = 'ref-gestion-info.docx';
+  const contentName = 'content-pnt-claude.docx';
+  const available = fixtureExists(refName) && fixtureExists(contentName);
+  if (!available) {
+    it.skip('saltado: faltan tests/fixtures/' + refName + ' o ' + contentName, () => {});
+    return;
+  }
+
+  it('classifier no se dispara: FHJTtulo1 ≤ 30 (antes de Fase 7 daba ~147)', async () => {
+    const { stats } = await IsoformaEngine.process({
+      refFile: readFixture(refName),
+      contentFile: readFixture(contentName),
+      outputType: 'nodebuffer'
+    });
+    // Pre-Fase 7 reportaba 147 títulos por la regex débil. Tras Fase 7 esperamos ≤ 30.
+    expect(stats.title1).toBeLessThanOrEqual(30);
+  });
+
+  it('preserva las 47 imágenes del content', async () => {
+    const { blob } = await IsoformaEngine.process({
+      refFile: readFixture(refName),
+      contentFile: readFixture(contentName),
+      outputType: 'nodebuffer'
+    });
+    const { files } = await unpackDocx(blob);
+    const drawings = (files['word/document.xml'].match(/<w:drawing/g) || []).length;
+    expect(drawings).toBe(47);
+  });
+
+  it('emite warnings normativos sobre el contenido stress', async () => {
+    const { warnings } = await IsoformaEngine.process({
+      refFile: readFixture(refName),
+      contentFile: readFixture(contentName),
+      outputType: 'nodebuffer'
+    });
+    const codes = warnings.map(w => w.code);
+    // El stress doc tiene runs subrayados y fuentes no-Arial → ambos warnings esperados.
+    expect(codes).toContain('NORMATIVA_UNDERLINE');
+    expect(codes).toContain('NORMATIVA_FONT_NON_ARIAL');
+  });
+});
+
+describe('Fase 7 — autoconsistencia: ref vs ref', () => {
+  const refName = 'ref-gestion-info.docx';
+  const otherName = 'ref-recomendaciones.docx';
+  const available = fixtureExists(refName) && fixtureExists(otherName);
+  if (!available) {
+    it.skip('saltado: faltan tests/fixtures/' + refName + ' o ' + otherName, () => {});
+    return;
+  }
+
+  it('procesa sin error y preserva mayoría de estilos FHJ pre-existentes', async () => {
+    const { stats } = await IsoformaEngine.process({
+      refFile: readFixture(refName),
+      contentFile: readFixture(otherName),
+      outputType: 'nodebuffer'
+    });
+    // El ref-recomendaciones ya viene perfectamente formateado, casi todo
+    // el body trae pStyle FHJ* → preservedStyles debe ser elevado.
+    expect(stats.preservedStyles).toBeGreaterThanOrEqual(100);
+  });
+});

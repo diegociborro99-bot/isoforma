@@ -97,8 +97,16 @@ function writeExtras() {
 }
 
 async function main() {
-  // Limpia dist/.
-  if (fs.existsSync(DIST)) fs.rmSync(DIST, { recursive: true, force: true });
+  // Limpia dist/. Si el FS no permite borrar (sandbox/CI con files read-only),
+  // se sigue: writeFileSync sobrescribe los artefactos de igual modo.
+  if (fs.existsSync(DIST)) {
+    try {
+      fs.rmSync(DIST, { recursive: true, force: true });
+    } catch (err) {
+      if (err && err.code !== 'EPERM' && err.code !== 'EACCES') throw err;
+      console.warn('  (limpieza de dist/ omitida: ' + err.code + ' — se sobrescribirá in-place)');
+    }
+  }
   fs.mkdirSync(DIST, { recursive: true });
 
   console.log('Construyendo dist/ ...');

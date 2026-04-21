@@ -1,5 +1,5 @@
 /**
- * Isoforma Engine v1.4
+ * Isoforma Engine v1.5
  * Motor de transformación de documentos PNT del Hospital de Jove.
  *
  * Comportamiento:
@@ -275,8 +275,17 @@
       return new DOMParser().parseFromString(documentXmlIn, 'application/xml');
     });
 
+    progress('Indexando formatos de lista');
+    // El classifier necesita saber si cada numId es bullet o numérico para
+    // distinguir FHJVieta* vs FHJLista* en párrafos con <w:numPr>.
+    const listAbstractIndex = await runStep('Indexando numbering.xml', () =>
+      buildListAbstractIndex(outputZip)
+    );
+
     progress('Aplicando estilos FHJ a párrafos');
-    const restyleStats = await runStep('Aplicando estilos FHJ', () => applyFhjStylesDom(docDoc));
+    const restyleStats = await runStep('Aplicando estilos FHJ', () =>
+      applyFhjStylesDom(docDoc, { listAbstractIndex })
+    );
     if (restyleStats.lowConfidence && restyleStats.lowConfidence.length > 0) {
       warnings.push({
         code: 'CLASSIFIER_LOW_CONFIDENCE',
@@ -313,6 +322,13 @@
     );
     for (const w of structuralWarnings) warnings.push(w);
 
+    // Fase 7 (Bloque D): validador normativo PNT.
+    progress('Validando normativa de formato');
+    const normativaWarnings = await runStep('Validación normativa', () =>
+      validateNormativaDom(docDoc)
+    );
+    for (const w of normativaWarnings) warnings.push(w);
+
     // Fase 6: validar que los pStyle refs del body estén en styles.xml.
     progress('Validando referencias a estilos');
     const pStyleWarning = await runStep('Validando pStyle IDs', () =>
@@ -345,6 +361,8 @@
         titPar: restyleStats.titPar,
         paragraph: restyleStats.paragraph,
         vignette: restyleStats.vignette,
+        list: restyleStats.list || 0,
+        preservedStyles: restyleStats.preserved || 0,
         tables: numberingStats.tables,
         figures: numberingStats.figures
       },
@@ -356,20 +374,41 @@
     return m && (m.code || '').trim() && (m.version || '').trim() && (m.title || '').trim();
   }
 
-  // Detectar si el documento ya trae un header con formato FHJ (drawing + rel a imagen)
-  // en cualquiera de los headers (header1, header2, header3)
+  // Marcadores de texto que identifican un header como "del FHJ". Cualquier
+  // documento con un header propio que contenga uno de estos se considera
+  // cabecera FHJ y se respeta tal cual.
+  const FHJ_HEADER_MARKERS = [
+    /Hospital\s+de\s+Jove/i,
+    /Fundaci[oó]n\s+Hospital\s+de\s+Jove/i,
+    /FHJ\b/i,
+    /\bP\.\d{2}\.\d{2}\.\d{3,}\b/   // código PNT → header claramente oficial
+  ];
+
+  // Detectar si el documento ya trae un header con formato FHJ.
+  //
+  // Fase 7: el check anterior era "tiene drawing + image rel" → machista,
+  // dejaba pasar cualquier documento con cualquier imagen en el header
+  // (tablas de membrete corporativas ajenas, logotipos de otros centros, etc.).
+  // Ahora exigimos **imagen + texto que lo identifique como FHJ**.
   async function detectFhjHeader(zip) {
     const candidates = ['header1', 'header2', 'header3'];
     for (const name of candidates) {
       const headerFile = zip.file(`word/${name}.xml`);
       if (!headerFile) continue;
       const headerXml = await headerFile.async('string');
-      if (!headerXml.includes('<w:drawing>') && !headerXml.includes('<w:pict>')) continue;
+      const hasDrawing = headerXml.includes('<w:drawing>') || headerXml.includes('<w:pict>');
+      if (!hasDrawing) continue;
+
       const relsFile = zip.file(`word/_rels/${name}.xml.rels`);
       if (!relsFile) continue;
       const relsText = await relsFile.async('string');
       const hasImageRel = /Type="[^"]*\/image"/.test(relsText) || /Target="[^"]*\/media\//.test(relsText);
-      if (hasImageRel) return true;
+      if (!hasImageRel) continue;
+
+      // Texto plano del header (stripped de etiquetas) para matching de marcadores.
+      const plainText = headerXml.replace(/<[^>]+>/g, ' ');
+      const isFhj = FHJ_HEADER_MARKERS.some(re => re.test(plainText));
+      if (isFhj) return true;
     }
     return false;
   }
@@ -731,25 +770,61 @@
     };
   }
 
+  /**
+   * Fase 7 (Bloque C): transfiere desde el ref todas las partes que componen
+   * el membrete: header1-3, footer1-3, cada .rels asociado, y el media referenciado
+   * por esos .rels (logo, sellos, firmas…). Para evitar colisión con media que
+   * el contenido ya tenga en word/media/, renombramos los targets del ref a
+   * "fhj_<nombreOriginal>" y reescribimos los .rels apuntando al nuevo nombre.
+   *
+   * Devuelve el listado de targets inyectados para debug.
+   */
   async function transferHeadersFootersAndLogo(refZip, outputZip) {
-    const files = [
-      'word/header1.xml', 'word/header2.xml', 'word/header3.xml',
-      'word/footer1.xml', 'word/footer2.xml', 'word/footer3.xml'
-    ];
-    for (const path of files) {
-      const file = refZip.file(path);
-      if (file) outputZip.file(path, await file.async('uint8array'));
+    const parts = ['header1', 'header2', 'header3', 'footer1', 'footer2', 'footer3'];
+    const injectedMedia = new Set();
+
+    for (const name of parts) {
+      const partFile = refZip.file('word/' + name + '.xml');
+      if (!partFile) continue;
+
+      // Copiar el xml del header/footer.
+      outputZip.file('word/' + name + '.xml', await partFile.async('uint8array'));
+
+      // Copiar + reescribir su .rels.
+      const relsFile = refZip.file('word/_rels/' + name + '.xml.rels');
+      if (!relsFile) continue;
+
+      let relsText = await relsFile.async('string');
+
+      // Encontrar todas las Relationships que apuntan a media y prefijarlas.
+      // media/image1.emf → media/fhj_image1.emf, etc.
+      const mediaRefRe = /Target="(media\/[^"]+)"/g;
+      const substitutions = [];
+      let m;
+      while ((m = mediaRefRe.exec(relsText)) !== null) {
+        const original = m[1];          // "media/image1.emf"
+        const basename = original.replace(/^media\//, '');
+        const fhjTarget = 'media/fhj_' + basename;
+        substitutions.push({ original, fhjTarget, basename });
+      }
+      for (const s of substitutions) {
+        const esc = s.original.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        relsText = relsText.replace(new RegExp('Target="' + esc + '"', 'g'), 'Target="' + s.fhjTarget + '"');
+
+        // Copiar el archivo media si no está ya inyectado.
+        if (!injectedMedia.has(s.fhjTarget)) {
+          const mediaFile = refZip.file('word/' + s.original);
+          if (mediaFile) {
+            outputZip.file('word/' + s.fhjTarget, await mediaFile.async('uint8array'));
+            injectedMedia.add(s.fhjTarget);
+          }
+        }
+      }
+
+      outputZip.file('word/_rels/' + name + '.xml.rels', relsText);
     }
-    const logoFile = refZip.file('word/media/image1.emf');
-    if (logoFile) {
-      outputZip.file('word/media/image1_fhj_logo.emf', await logoFile.async('uint8array'));
-    }
-    const header2Rels = refZip.file('word/_rels/header2.xml.rels');
-    if (header2Rels) {
-      let relsText = await header2Rels.async('string');
-      relsText = relsText.replace('media/image1.emf', 'media/image1_fhj_logo.emf');
-      outputZip.file('word/_rels/header2.xml.rels', relsText);
-    }
+
+    return { injectedMedia: Array.from(injectedMedia) };
   }
 
   async function customizeHeader(outputZip, metadata) {
@@ -849,38 +924,167 @@
   // Fase 2: funciones DOM-based sobre document.xml
   // ============================================================
 
-  function applyFhjStylesDom(doc) {
-    let title1 = 0, titPar = 0, paragraph = 0, vignette = 0;
+  /**
+   * Fase 7 (Bloque A): clasificador con respeto a estilos pre-existentes.
+   *
+   * Orden de decisión por párrafo:
+   *  1. Si ya tiene un pStyle FHJ* válido → respetarlo (trust path).
+   *  2. Si tiene <w:numPr> con numId → es lista. Mapear a FHJVieta(1|2|3) o
+   *     FHJLista(1|2|3) según el numFmt del nivel (bullet vs numérico) y el ilvl.
+   *  3. Si su pStyle es "Normal" → tratarlo como párrafo no clasificado y
+   *     pasarlo por el classifier (acabará como FHJPrrafo si nada más coincide).
+   *  4. Si su pStyle es "ListParagraph" sin numPr → bullet por defecto.
+   *  5. Si arranca con bullet ASCII (-, •, ▪…) → FHJVietaNivel1.
+   *  6. classifyParagraphDetailed() — fall-through normativo.
+   *
+   * El listAbstractIndex permite, para un numId del body, recuperar el lvl 0/1/2
+   * y su numFmt para distinguir bullet vs numérico.
+   */
+  function applyFhjStylesDom(doc, opts) {
+    opts = opts || {};
+    const listAbstractIndex = opts.listAbstractIndex || null; // { numId → {ilvl0,1,2: 'bullet'|'decimal'|'lowerLetter'|'lowerRoman'|'upperLetter'} }
+
+    let title1 = 0, titPar = 0, paragraph = 0, vignette = 0, list = 0, preserved = 0;
     const lowConfidence = [];
     const paragraphs = Array.from(doc.getElementsByTagName('w:p'));
     for (const p of paragraphs) {
       const rawText = getParagraphTextDom(p);
       const text = normalizeParagraphText(rawText);
-      if (!text) continue;
 
-      let style, confidence, reason;
-      if (isListItem(text)) {
+      // Inspeccionar el pStyle pre-existente y la presencia de numPr.
+      const existingStyle = getExistingPStyle(p);
+      const numPrInfo = readNumPr(p);
+
+      // 1) Trust path: el contenido ya viene marcado con FHJ* — lo respetamos.
+      if (existingStyle && /^FHJ/.test(existingStyle)) {
+        preserved++;
+        if (existingStyle === 'FHJTtulo1') title1++;
+        else if (existingStyle === 'FHJTtuloprrafo') titPar++;
+        else if (existingStyle === 'FHJPrrafo') paragraph++;
+        else if (/^FHJVieta/.test(existingStyle) || /^FHJLista/.test(existingStyle)) {
+          vignette++;
+          list++;
+        }
+        continue;
+      }
+
+      // Sin texto → puede ser un párrafo "ancla" para una imagen o tabla.
+      // Si no tiene FHJ ni numPr, lo dejamos como está para no romper layout.
+      if (!text && !numPrInfo) continue;
+
+      let style = null, confidence = 'high', reason = '';
+
+      // 2) Lista por numPr → nunca puede ser título.
+      if (numPrInfo) {
+        const fmt = listAbstractIndex && listAbstractIndex[numPrInfo.numId]
+          ? (listAbstractIndex[numPrInfo.numId][numPrInfo.ilvl] || null)
+          : null;
+        const isBullet = !fmt || fmt === 'bullet' || fmt === 'none';
+        const lvl = numPrInfo.ilvl + 1; // 0-based → 1-based
+        const family = isBullet ? 'FHJVietaNivel' : 'FHJListaNivel';
+        const clamped = Math.max(1, Math.min(3, lvl));
+        style = family + clamped;
+        reason = 'numPr-' + (isBullet ? 'bullet' : 'numbered') + '-lvl' + lvl;
+      } else if (existingStyle === 'ListParagraph') {
+        // 4) Sin numPr pero estilo "ListParagraph" — Word lo usa para bullets sueltos.
         style = 'FHJVietaNivel1';
-        confidence = 'high';
+        reason = 'list-paragraph';
+      } else if (text && isListItem(text)) {
+        // 5) Bullet ASCII al inicio del texto.
+        style = 'FHJVietaNivel1';
         reason = 'list-item';
-      } else {
+      } else if (text) {
+        // 3 + 6) Normal o sin estilo → classifier normativo.
         const result = classifyParagraphDetailed(text);
         style = result.style;
         confidence = result.confidence;
         reason = result.reason;
       }
+
       if (!style) continue;
 
       if (confidence === 'medium') {
-        lowConfidence.push({ style, reason, text: text.slice(0, 80) });
+        lowConfidence.push({ style, reason, text: (text || '').slice(0, 80) });
       }
       if (style === 'FHJTtulo1') title1++;
       else if (style === 'FHJTtuloprrafo') titPar++;
       else if (style === 'FHJPrrafo') paragraph++;
-      else if (style === 'FHJVietaNivel1') vignette++;
+      else if (/^FHJVieta/.test(style)) { vignette++; list++; }
+      else if (/^FHJLista/.test(style)) { list++; }
+
       setParagraphStyleDom(doc, p, style);
     }
-    return { title1, titPar, paragraph, vignette, lowConfidence };
+    return { title1, titPar, paragraph, vignette, list, preserved, lowConfidence };
+  }
+
+  /** Devuelve el styleId del <w:pStyle> dentro del <w:pPr> de un párrafo, o null. */
+  function getExistingPStyle(p) {
+    const pPr = firstChildByName(p, 'w:pPr');
+    if (!pPr) return null;
+    const pStyle = firstChildByName(pPr, 'w:pStyle');
+    if (!pStyle) return null;
+    return pStyle.getAttributeNS(W_NS, 'val') || pStyle.getAttribute('w:val') || null;
+  }
+
+  /** Lee <w:numPr> de un párrafo y devuelve { numId, ilvl } o null. */
+  function readNumPr(p) {
+    const pPr = firstChildByName(p, 'w:pPr');
+    if (!pPr) return null;
+    const numPr = firstChildByName(pPr, 'w:numPr');
+    if (!numPr) return null;
+    const numIdEl = firstChildByName(numPr, 'w:numId');
+    const ilvlEl = firstChildByName(numPr, 'w:ilvl');
+    const numId = numIdEl ? Number(numIdEl.getAttributeNS(W_NS, 'val') || numIdEl.getAttribute('w:val') || 0) : 0;
+    const ilvl = ilvlEl ? Number(ilvlEl.getAttributeNS(W_NS, 'val') || ilvlEl.getAttribute('w:val') || 0) : 0;
+    if (!numId || Number.isNaN(numId)) return null;
+    return { numId, ilvl: Math.max(0, ilvl) };
+  }
+
+  /**
+   * Construye un índice { numId → { 0: 'bullet'|'decimal'|..., 1: ..., 2: ... } }
+   * leyendo word/numbering.xml del outputZip. Tolera ausencia (devuelve {}).
+   */
+  async function buildListAbstractIndex(outputZip) {
+    const idx = {};
+    const numFile = outputZip.file('word/numbering.xml');
+    if (!numFile) return idx;
+    const xml = await numFile.async('string');
+    let doc;
+    try { doc = new DOMParser().parseFromString(xml, 'application/xml'); } catch (e) { return idx; }
+
+    // Primero: abstractNumId → { ilvl → numFmt }.
+    const abstractFmts = {};
+    const abstractNodes = doc.getElementsByTagName('w:abstractNum');
+    for (let i = 0; i < abstractNodes.length; i++) {
+      const aNode = abstractNodes[i];
+      const aId = aNode.getAttributeNS(W_NS, 'abstractNumId') || aNode.getAttribute('w:abstractNumId');
+      if (aId == null) continue;
+      const lvls = aNode.getElementsByTagName('w:lvl');
+      const map = {};
+      for (let j = 0; j < lvls.length; j++) {
+        const lvl = lvls[j];
+        const ilvl = Number(lvl.getAttributeNS(W_NS, 'ilvl') || lvl.getAttribute('w:ilvl') || 0);
+        const fmtEl = firstChildByName(lvl, 'w:numFmt');
+        const fmt = fmtEl ? (fmtEl.getAttributeNS(W_NS, 'val') || fmtEl.getAttribute('w:val') || 'bullet') : 'bullet';
+        map[ilvl] = fmt;
+      }
+      abstractFmts[Number(aId)] = map;
+    }
+
+    // Después: numId → abstractNumId.
+    const numNodes = doc.getElementsByTagName('w:num');
+    for (let i = 0; i < numNodes.length; i++) {
+      const nNode = numNodes[i];
+      const nId = nNode.getAttributeNS(W_NS, 'numId') || nNode.getAttribute('w:numId');
+      if (nId == null) continue;
+      const absRef = firstChildByName(nNode, 'w:abstractNumId');
+      if (!absRef) continue;
+      const aId = absRef.getAttributeNS(W_NS, 'val') || absRef.getAttribute('w:val');
+      if (aId == null) continue;
+      const fmts = abstractFmts[Number(aId)];
+      if (fmts) idx[Number(nId)] = fmts;
+    }
+    return idx;
   }
 
   /**
@@ -973,9 +1177,26 @@
     }
 
     // FHJTtulo1 — numeración de primer nivel ("1.-", "1.", "1)", "1 ") seguido de
-    // letra mayúscula. Exigimos mayúscula para no confundir con "1. algo" de una lista.
-    if (/^\d+[\.\-\)\s]+[A-ZÁÉÍÓÚÑ]/.test(text)) {
-      return { style: 'FHJTtulo1', confidence: 'high', reason: 'numbered-level-1' };
+    // mayúscula Y con resto del texto que parece título (corto, ALL-CAPS o
+    // capitalizado, sin verbos imperativos típicos de pasos de procedimiento).
+    //
+    // Fase 7: el classifier viejo metía como Título 1 cualquier "1. Lavarse..."
+    // que es un paso, no un título. Endurecemos las condiciones:
+    //   - texto total ≤ 90 caracteres
+    //   - todo el texto tras el prefijo numérico es ALL-CAPS o tiene ratio alto
+    //     de mayúsculas (≥ 0.6 sobre las letras alfabéticas)
+    const leadM = text.match(/^(\d+)[\.\-\)\s]+([A-ZÁÉÍÓÚÑ].*)$/);
+    if (leadM) {
+      const rest = leadM[2];
+      if (text.length <= 90) {
+        const letters = rest.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]/g, '');
+        const upperLetters = rest.replace(/[^A-ZÁÉÍÓÚÑ]/g, '').length;
+        const ratio = letters.length ? upperLetters / letters.length : 0;
+        if (ratio >= 0.6) {
+          return { style: 'FHJTtulo1', confidence: 'high', reason: 'numbered-level-1' };
+        }
+      }
+      // Si no cumple, es un paso de procedimiento — lo trataremos como párrafo.
     }
 
     // FHJTtulo1 por ancla — palabra clave sola, o casi (≤ 50 chars).
@@ -1338,6 +1559,146 @@
       }
     }
     return contentTypes;
+  }
+
+  // ============================================================
+  // Fase 7 (Bloque D): validador normativo — detecta desviaciones
+  // respecto a la normativa PNT del Hospital de Jove.
+  // ============================================================
+
+  /**
+   * Ejecuta un conjunto de checks sobre el documento ya reformateado:
+   *   - NORMATIVA_ALL_CAPS_BODY: párrafos de cuerpo en ALL-CAPS largos (se
+   *     penaliza sólo cuerpo — títulos pueden ir en mayúsculas).
+   *   - NORMATIVA_UNDERLINE: runs con <w:u/> en el body (la normativa pide
+   *     prescindir del subrayado salvo en enlaces).
+   *   - NORMATIVA_EMPTY_LIST: bullets/listas numeradas sin texto.
+   *   - NORMATIVA_MISSING_DATOS_GENERALES: no se detecta la tabla FHJ.
+   *   - NORMATIVA_FONT_NON_ARIAL: runs con <w:rFonts> distinto de Arial.
+   *
+   * No muta el documento. Cada warning incluye un `samples` corto para que
+   * el usuario pueda localizar rápidamente.
+   */
+  function validateNormativaDom(doc) {
+    const warnings = [];
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return warnings;
+
+    const paragraphs = Array.from(doc.getElementsByTagName('w:p'));
+
+    // Helpers: detectar estilo FHJ títulos para saltarlos en ALL-CAPS check.
+    const isTitleStyle = (styleId) => /^FHJTtulo/.test(styleId || '');
+
+    // 1) ALL-CAPS en cuerpo — párrafos no-título, ≥ 40 chars, ratio mayúsculas ≥ 0.9
+    const allCapsSamples = [];
+    for (const p of paragraphs) {
+      const styleId = getExistingPStyle(p);
+      if (isTitleStyle(styleId)) continue;
+      const text = normalizeParagraphText(getParagraphTextDom(p));
+      if (!text || text.length < 40) continue;
+      const letters = text.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]/g, '');
+      if (letters.length < 20) continue;
+      const upperLetters = text.replace(/[^A-ZÁÉÍÓÚÑ]/g, '').length;
+      const ratio = upperLetters / letters.length;
+      if (ratio >= 0.9) {
+        allCapsSamples.push(text.slice(0, 120));
+      }
+    }
+    if (allCapsSamples.length) {
+      warnings.push({
+        code: 'NORMATIVA_ALL_CAPS_BODY',
+        message: 'Se detectaron ' + allCapsSamples.length + ' párrafos de cuerpo escritos enteramente en mayúsculas. La normativa desaconseja el uso de ALL-CAPS en el cuerpo del PNT por ser difícil de leer.',
+        context: { count: allCapsSamples.length, samples: allCapsSamples.slice(0, 5) }
+      });
+    }
+
+    // 2) Subrayado en runs del body (no incluye header/footer).
+    const bodyRuns = Array.from(body.getElementsByTagName('w:r'));
+    let underlineCount = 0;
+    const underlineSamples = [];
+    for (const r of bodyRuns) {
+      const rPr = firstChildByName(r, 'w:rPr');
+      if (!rPr) continue;
+      const u = firstChildByName(rPr, 'w:u');
+      if (!u) continue;
+      const val = u.getAttributeNS(W_NS, 'val') || u.getAttribute('w:val') || 'single';
+      if (val === 'none') continue;
+      underlineCount++;
+      if (underlineSamples.length < 5) {
+        const ts = r.getElementsByTagName('w:t');
+        let t = '';
+        for (let i = 0; i < ts.length; i++) t += ts[i].textContent || '';
+        if (t.trim()) underlineSamples.push(t.trim().slice(0, 80));
+      }
+    }
+    if (underlineCount > 0) {
+      warnings.push({
+        code: 'NORMATIVA_UNDERLINE',
+        message: 'Se detectaron ' + underlineCount + ' fragmentos subrayados en el cuerpo. La normativa PNT recomienda reservar el subrayado para hiperenlaces.',
+        context: { count: underlineCount, samples: underlineSamples }
+      });
+    }
+
+    // 3) Listas vacías: párrafos con pStyle FHJVieta(1|2|3) o FHJLista(1|2|3) sin texto.
+    let emptyListCount = 0;
+    for (const p of paragraphs) {
+      const styleId = getExistingPStyle(p);
+      if (!styleId) continue;
+      if (!/^FHJ(Vieta|Lista)/.test(styleId)) continue;
+      const text = normalizeParagraphText(getParagraphTextDom(p));
+      if (!text) emptyListCount++;
+    }
+    if (emptyListCount > 0) {
+      warnings.push({
+        code: 'NORMATIVA_EMPTY_LIST',
+        message: 'Se detectaron ' + emptyListCount + ' ítems de lista sin contenido. Revísalos o elimínalos.',
+        context: { count: emptyListCount }
+      });
+    }
+
+    // 4) Datos generales: ¿hay al menos una tabla que reconozcamos?
+    let hasDatosGenerales = false;
+    const tables = doc.getElementsByTagName('w:tbl');
+    for (let i = 0; i < tables.length; i++) {
+      if (isDatosGeneralesTable(tables[i])) { hasDatosGenerales = true; break; }
+    }
+    if (!hasDatosGenerales) {
+      warnings.push({
+        code: 'NORMATIVA_MISSING_DATOS_GENERALES',
+        message: 'No se detectó la tabla de "Datos generales" (Código, Versión, Elaborado/Revisado/Aprobado, Fecha de entrada). La normativa exige esta tabla al inicio del PNT.',
+        context: {}
+      });
+    }
+
+    // 5) Fuentes no-Arial en runs del body.
+    const fontCounts = {};
+    let totalFontRuns = 0;
+    for (const r of bodyRuns) {
+      const rPr = firstChildByName(r, 'w:rPr');
+      if (!rPr) continue;
+      const rFonts = firstChildByName(rPr, 'w:rFonts');
+      if (!rFonts) continue;
+      const candidates = [
+        rFonts.getAttributeNS(W_NS, 'ascii') || rFonts.getAttribute('w:ascii'),
+        rFonts.getAttributeNS(W_NS, 'hAnsi') || rFonts.getAttribute('w:hAnsi'),
+        rFonts.getAttributeNS(W_NS, 'cs') || rFonts.getAttribute('w:cs')
+      ].filter(Boolean);
+      for (const f of candidates) {
+        totalFontRuns++;
+        fontCounts[f] = (fontCounts[f] || 0) + 1;
+      }
+    }
+    const nonArial = Object.entries(fontCounts).filter(([name]) => !/^Arial\b/i.test(name));
+    if (nonArial.length > 0) {
+      const totalNonArial = nonArial.reduce((s, [, n]) => s + n, 0);
+      warnings.push({
+        code: 'NORMATIVA_FONT_NON_ARIAL',
+        message: 'Se detectaron fuentes distintas de Arial en el cuerpo (' + totalNonArial + ' runs). La normativa exige Arial 10 para todo el cuerpo.',
+        context: { fonts: Object.fromEntries(nonArial.slice(0, 8)) }
+      });
+    }
+
+    return warnings;
   }
 
   // ============================================================

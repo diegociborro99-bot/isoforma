@@ -109,15 +109,17 @@ describe('Isoforma engine — caso B (contenido SIN cabecera FHJ)', () => {
     expect(files['word/header2.xml']).toContain('[TITULO DEL PROCEDIMIENTO]');
   });
 
-  it('renombra el logo a image1_fhj_logo.emf y actualiza header2.xml.rels', async () => {
+  it('renombra el logo con prefijo fhj_ y actualiza header2.xml.rels', async () => {
+    // Fase 7 (Bloque C): el logo se importa como fhj_<basename> para evitar
+    // colisión con cualquier media/image1.emf que el contenido ya traiga.
     const refFile = await buildReferentDocx();
     const contentFile = await buildContentDocx({ withFhjHeader: false });
 
     const { blob } = await runEngine({ refFile, contentFile });
     const { zip, files } = await unpackDocx(blob);
 
-    expect(zip.file('word/media/image1_fhj_logo.emf')).not.toBeNull();
-    expect(files['word/_rels/header2.xml.rels']).toContain('image1_fhj_logo.emf');
+    expect(zip.file('word/media/fhj_image1.emf')).not.toBeNull();
+    expect(files['word/_rels/header2.xml.rels']).toContain('fhj_image1.emf');
   });
 
   it('añade las 6 relaciones header/footer en document.xml.rels', async () => {
