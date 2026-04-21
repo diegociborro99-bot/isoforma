@@ -371,9 +371,117 @@ footer{padding:60px 0 40px;border-top:1px solid var(--line);position:relative;z-
   .steps{font-size:9px;overflow-x:auto;padding-bottom:12px}
 }
 input[type=file]{display:none}
+
+/* LOGIN GATE */
+.login-gate{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:32px;transition:opacity .5s var(--ease)}
+.login-gate.hidden{opacity:0;pointer-events:none}
+.login-gate::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 30% 30%,rgba(31,61,43,.08),transparent 60%),radial-gradient(circle at 70% 70%,rgba(184,147,90,.06),transparent 60%);pointer-events:none}
+.login-card{position:relative;background:var(--white);border:1px solid var(--line);padding:52px 48px 40px;width:100%;max-width:420px;box-shadow:var(--shadow-lg);animation:rise .7s var(--ease)}
+.login-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--gold))}
+.login-logo{display:flex;align-items:center;gap:12px;margin-bottom:24px}
+.login-logo-svg{width:32px;height:32px}
+.login-logo-svg svg{width:100%;height:100%;overflow:visible}
+.login-logo-svg .circle-a,.login-logo-svg .circle-b{fill:none;stroke:var(--accent);stroke-width:2;transform-origin:center}
+.login-logo-svg .circle-a{animation:breathe-a 6s ease-in-out infinite}
+.login-logo-svg .circle-b{animation:breathe-b 6s ease-in-out infinite}
+.login-logo-svg .dot{fill:var(--accent);animation:pulse-dot 3s ease-in-out infinite}
+.login-name{font-family:'Instrument Serif',serif;font-size:24px;color:var(--ink)}
+.login-name em{color:var(--accent);font-style:italic}
+.login-title{font-family:'Instrument Serif',serif;font-size:30px;line-height:1.15;margin-bottom:8px;color:var(--ink);letter-spacing:-.01em}
+.login-sub{font-size:13.5px;color:var(--ink-soft);margin-bottom:26px;line-height:1.55}
+.login-field{margin-bottom:14px}
+.login-field label{display:block;font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:8px}
+.login-field input{width:100%;padding:13px 16px;border:1px solid var(--line);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:15px;color:var(--ink);transition:border-color .2s,background .2s}
+.login-field input:focus{outline:none;border-color:var(--accent);background:var(--white)}
+.login-error{font-family:'JetBrains Mono',monospace;font-size:11px;color:#B23838;margin:4px 0 14px;min-height:14px;letter-spacing:.02em}
+.login-btn{width:100%;padding:15px;border:none;background:var(--accent);color:var(--white);font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;transition:background .2s,transform .1s}
+.login-btn:hover:not(:disabled){background:var(--accent-glow)}
+.login-btn:active{transform:scale(.98)}
+.login-btn:disabled{opacity:.6;cursor:wait}
+.login-foot{margin-top:22px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-mute);letter-spacing:.1em;text-transform:uppercase;text-align:center}
+body.gated{overflow:hidden}
+body.gated > *:not(.login-gate){filter:blur(8px);pointer-events:none;user-select:none}
+body.gated .cursor-dot,body.gated .cursor-ring{display:none}
 </style>
 </head>
-<body>
+<body class="gated">
+
+<!-- LOGIN GATE -->
+<div class="login-gate" id="loginGate">
+  <form class="login-card" id="loginForm" autocomplete="off" spellcheck="false">
+    <div class="login-logo">
+      <div class="login-logo-svg">
+        <svg viewBox="0 0 56 56"><circle class="circle-a" cx="22" cy="28" r="16"/><circle class="circle-b" cx="34" cy="28" r="16"/><circle class="dot" cx="28" cy="28" r="2"/></svg>
+      </div>
+      <div class="login-name">Iso<em>forma</em></div>
+    </div>
+    <h1 class="login-title">Acceso restringido</h1>
+    <p class="login-sub">Herramienta interna del Hospital de Jove. Introduce tus credenciales para continuar.</p>
+    <div class="login-field">
+      <label for="loginUser">Usuario</label>
+      <input type="text" id="loginUser" name="username" autocomplete="off" spellcheck="false" required>
+    </div>
+    <div class="login-field">
+      <label for="loginPass">Contraseña</label>
+      <input type="password" id="loginPass" name="password" autocomplete="off" required>
+    </div>
+    <div class="login-error" id="loginError" aria-live="polite"></div>
+    <button type="submit" class="login-btn" id="loginBtn">Entrar</button>
+    <div class="login-foot">Fundación Hospital de Jove · Laboratorio</div>
+  </form>
+</div>
+<script>
+(function(){
+  const EXPECTED_USER='DCG';
+  const EXPECTED_HASH='520da7892751bc401951512e415b2ed3670c1cde8921d172b4cb03c70b5cbfff';
+  const GATE_KEY='isoforma_auth_v1';
+  const gate=document.getElementById('loginGate');
+  const form=document.getElementById('loginForm');
+  const userInput=document.getElementById('loginUser');
+  const passInput=document.getElementById('loginPass');
+  const errBox=document.getElementById('loginError');
+  const btn=document.getElementById('loginBtn');
+  try{
+    if(sessionStorage.getItem(GATE_KEY)==='1'){
+      gate.remove();
+      document.body.classList.remove('gated');
+      return;
+    }
+  }catch(_){}
+  setTimeout(()=>userInput.focus(),60);
+  async function sha256(str){
+    const buf=new TextEncoder().encode(str);
+    const hash=await crypto.subtle.digest('SHA-256',buf);
+    return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+  form.addEventListener('submit',async(e)=>{
+    e.preventDefault();
+    errBox.textContent='';
+    btn.disabled=true;
+    btn.textContent='Verificando…';
+    const user=userInput.value.trim();
+    const pass=passInput.value;
+    try{
+      const hash=await sha256(pass);
+      if(user===EXPECTED_USER && hash===EXPECTED_HASH){
+        try{sessionStorage.setItem(GATE_KEY,'1');}catch(_){}
+        gate.classList.add('hidden');
+        setTimeout(()=>{gate.remove();document.body.classList.remove('gated');},500);
+      }else{
+        errBox.textContent='Usuario o contraseña incorrectos.';
+        passInput.value='';
+        passInput.focus();
+        btn.disabled=false;
+        btn.textContent='Entrar';
+      }
+    }catch(err){
+      errBox.textContent='Error al verificar credenciales.';
+      btn.disabled=false;
+      btn.textContent='Entrar';
+    }
+  });
+})();
+</script>
 
 <div class="cursor-dot" id="cursorDot"></div>
 <div class="cursor-ring" id="cursorRing"></div>
