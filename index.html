@@ -237,6 +237,25 @@ section{position:relative;padding:120px 0;z-index:2}
 .stat-label{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-mute)}
 .result-actions{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;padding:40px 56px}
 .result-meta{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-mute);text-align:center;padding:0 56px 32px;letter-spacing:.15em;text-transform:uppercase}
+.result-fixes{padding:0 56px 28px;display:none;border-top:1px solid var(--line-soft);margin-top:0;padding-top:28px}
+.result-fixes.show{display:block}
+.result-fixes-title{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:14px;display:flex;align-items:center;gap:10px}
+.result-fixes-title::before{content:'';width:6px;height:6px;background:var(--accent);border-radius:50%;flex-shrink:0}
+.result-fixes-chips{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px}
+.fix-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;background:rgba(217,160,67,.08);border:1px solid rgba(217,160,67,.3);border-radius:999px;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--ink)}
+.fix-chip .fix-count{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent);font-weight:600}
+.fix-chip.empty{opacity:.55;background:transparent;border-color:var(--line);color:var(--ink-mute)}
+.fix-chip.empty .fix-count{color:var(--ink-mute)}
+.result-fixes-detail{font-family:'DM Sans',sans-serif;font-size:13px;color:var(--ink-soft);margin-top:8px}
+.result-fixes-detail summary{cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-mute);padding:8px 0;list-style:none;outline:none}
+.result-fixes-detail summary::-webkit-details-marker{display:none}
+.result-fixes-detail summary::before{content:'+ ';color:var(--accent);font-weight:600}
+.result-fixes-detail[open] summary::before{content:'− '}
+.result-fixes-detail .fix-group{margin-top:14px;padding-top:14px;border-top:1px dashed var(--line-soft)}
+.result-fixes-detail .fix-group:first-of-type{border-top:0;margin-top:0;padding-top:0}
+.result-fixes-detail .fix-group-title{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink);margin-bottom:8px}
+.result-fixes-detail .fix-sample{padding:8px 12px;margin:6px 0;background:var(--sand);border-left:2px solid var(--accent);font-size:12.5px;color:var(--ink-soft);line-height:1.5;border-radius:2px}
+.result-fixes-detail .fix-sample-meta{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-mute);letter-spacing:.08em;text-transform:uppercase;margin-top:4px}
 .result-warnings{padding:0 56px 32px;display:none}
 .result-warnings.show{display:block}
 .result-warnings-title{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);margin-bottom:14px;display:flex;align-items:center;gap:10px}
@@ -376,7 +395,7 @@ input[type=file]{display:none}
     <div class="hero-content">
       <div class="hero-eyebrow">
         <span class="hero-eyebrow-dot"></span>
-        Fundación Hospital de Jove · v0.8 beta
+        Fundación Hospital de Jove · v0.9 beta
       </div>
       <h1>
         <span class="line"><span class="line-inner">Un documento,</span></span>
@@ -546,6 +565,14 @@ input[type=file]{display:none}
         </button>
       </div>
       <div class="result-meta" id="resultMeta"></div>
+      <div class="result-fixes" id="resultFixes">
+        <div class="result-fixes-title">Correcciones aplicadas automáticamente</div>
+        <div class="result-fixes-chips" id="resultFixesChips"></div>
+        <details class="result-fixes-detail" id="resultFixesDetail">
+          <summary>Ver ejemplos concretos</summary>
+          <div id="resultFixesSamples"></div>
+        </details>
+      </div>
       <div class="result-warnings" id="resultWarnings">
         <div class="result-warnings-title">Avisos no bloqueantes</div>
         <ul id="resultWarningsList"></ul>
@@ -648,7 +675,7 @@ input[type=file]{display:none}
       </div>
     </div>
     <div class="footer-bottom">
-      <span>Isoforma · v0.8</span>
+      <span>Isoforma · v0.9</span>
       <span>Fundación Hospital de Jove · 2026</span>
     </div>
     <div class="footer-signature">vibe coded with <span class="heart">&#9829;</span> by <em>Highkey Labs</em></div>
@@ -724,6 +751,10 @@ const els = {
   resultMeta: document.getElementById('resultMeta'),
   resultWarnings: document.getElementById('resultWarnings'),
   resultWarningsList: document.getElementById('resultWarningsList'),
+  resultFixes: document.getElementById('resultFixes'),
+  resultFixesChips: document.getElementById('resultFixesChips'),
+  resultFixesDetail: document.getElementById('resultFixesDetail'),
+  resultFixesSamples: document.getElementById('resultFixesSamples'),
   uploadsRow: document.getElementById('uploadsRow'),
   statPages: document.getElementById('statPages'),
   statSize: document.getElementById('statSize'),
@@ -904,6 +935,81 @@ function describeWarning(w) {
   return WARNING_LABELS[w.code] || (w.message || 'Aviso sin descripción detallada.');
 }
 
+const FIX_LABELS = {
+  underline: { title: 'Subrayado eliminado', singular: 'subrayado', plural: 'subrayados' },
+  font: { title: 'Fuente reescrita a Arial', singular: 'fuente no-Arial', plural: 'fuentes no-Arial' },
+  allCaps: { title: 'Descapitalizado', singular: 'párrafo en mayúsculas', plural: 'párrafos en mayúsculas' },
+  emptyList: { title: 'Ítem vacío eliminado', singular: 'ítem vacío', plural: 'ítems vacíos' }
+};
+
+function renderFixes(stats) {
+  if (!els.resultFixes) return;
+  if (!stats || !stats.autoFixApplied || !stats.fixes) {
+    els.resultFixes.classList.remove('show');
+    return;
+  }
+  const f = stats.fixes;
+  const total = (f.underline || 0) + (f.font || 0) + (f.allCaps || 0) + (f.emptyList || 0);
+
+  // Chips (siempre mostrar los 4 tipos; los de 0 en gris tenue)
+  els.resultFixesChips.innerHTML = '';
+  ['underline', 'font', 'allCaps', 'emptyList'].forEach(kind => {
+    const count = f[kind] || 0;
+    const label = FIX_LABELS[kind];
+    const chip = document.createElement('span');
+    chip.className = 'fix-chip' + (count === 0 ? ' empty' : '');
+    const unit = count === 1 ? label.singular : label.plural;
+    chip.innerHTML = `<span class="fix-count">${count}</span><span>${unit}</span>`;
+    els.resultFixesChips.appendChild(chip);
+  });
+
+  // Samples (solo si hay algo que mostrar)
+  els.resultFixesSamples.innerHTML = '';
+  const samples = f.samples || {};
+  let anySample = false;
+  ['underline', 'font', 'allCaps', 'emptyList'].forEach(kind => {
+    const list = samples[kind] || [];
+    if (!list.length) return;
+    anySample = true;
+    const group = document.createElement('div');
+    group.className = 'fix-group';
+    const title = document.createElement('div');
+    title.className = 'fix-group-title';
+    title.textContent = FIX_LABELS[kind].title + ' · ' + list.length + ' ejemplo' + (list.length === 1 ? '' : 's');
+    group.appendChild(title);
+    list.forEach(item => {
+      const sample = document.createElement('div');
+      sample.className = 'fix-sample';
+      const text = document.createElement('div');
+      text.textContent = item.text || '';
+      sample.appendChild(text);
+      if (item.font) {
+        const meta = document.createElement('div');
+        meta.className = 'fix-sample-meta';
+        meta.textContent = 'Fuente original: ' + item.font;
+        sample.appendChild(meta);
+      }
+      group.appendChild(sample);
+    });
+    els.resultFixesSamples.appendChild(group);
+  });
+
+  // Si no hay muestras (total = 0 o no se capturaron), ocultamos el <details>
+  if (els.resultFixesDetail) {
+    els.resultFixesDetail.style.display = anySample ? '' : 'none';
+    els.resultFixesDetail.open = false;
+  }
+
+  // Título del bloque según si hubo o no correcciones
+  const titleEl = els.resultFixes.querySelector('.result-fixes-title');
+  if (titleEl) {
+    titleEl.textContent = total === 0
+      ? 'Auto-fix activo — nada que corregir'
+      : 'Correcciones aplicadas automáticamente';
+  }
+  els.resultFixes.classList.add('show');
+}
+
 function renderWarnings(warnings) {
   els.resultWarningsList.innerHTML = '';
   if (!Array.isArray(warnings) || warnings.length === 0) {
@@ -966,26 +1072,12 @@ els.btnProcess.addEventListener('click', async () => {
     const listNote = (typeof s.list === 'number' && s.list > 0)
       ? ` · ${s.list} listas numeradas`
       : '';
-    let fixesNote = '';
-    if (s.autoFixApplied && s.fixes) {
-      const f = s.fixes;
-      const totalFixes = (f.underline || 0) + (f.font || 0) + (f.allCaps || 0) + (f.emptyList || 0);
-      if (totalFixes > 0) {
-        const parts = [];
-        if (f.underline) parts.push(`${f.underline} subrayados`);
-        if (f.font) parts.push(`${f.font} fuentes no-Arial`);
-        if (f.allCaps) parts.push(`${f.allCaps} párrafos en mayúsculas`);
-        if (f.emptyList) parts.push(`${f.emptyList} ítems de lista vacíos`);
-        fixesNote = ` · auto-fix aplicado: ${parts.join(', ')}`;
-      } else {
-        fixesNote = ' · auto-fix: nada que corregir';
-      }
-    }
     els.resultMeta.textContent =
       `${headerNote} · ${s.title1} títulos · ${s.titPar} subtítulos · ${s.paragraph} párrafos · ` +
       `${s.vignette} viñetas${listNote} · ${s.tables} tablas · ${s.figures} figuras` +
-      trustNote + fixesNote;
+      trustNote;
 
+    renderFixes(s);
     renderWarnings(state.warnings);
 
     const okMsg = state.warnings.length
@@ -1024,6 +1116,9 @@ els.btnReset.addEventListener('click', () => {
   els.resultPanel.classList.remove('show');
   els.resultWarnings.classList.remove('show');
   els.resultWarningsList.innerHTML = '';
+  if (els.resultFixes) els.resultFixes.classList.remove('show');
+  if (els.resultFixesChips) els.resultFixesChips.innerHTML = '';
+  if (els.resultFixesSamples) els.resultFixesSamples.innerHTML = '';
   els.statusLog.textContent = '';
   els.statusLog.innerHTML = '';
   els.statusLog.className = 'status-log';

@@ -1,5 +1,5 @@
 /**
- * Isoforma Engine v1.6
+ * Isoforma Engine v1.7
  * Motor de transformación de documentos PNT del Hospital de Jove.
  *
  * Comportamiento:
@@ -229,7 +229,10 @@
     // activa por defecto mediante un checkbox.
     const doAutoFix = autoFix === true;
     const warnings = [];
-    let fixes = { underline: 0, font: 0, allCaps: 0, emptyList: 0 };
+    let fixes = {
+      underline: 0, font: 0, allCaps: 0, emptyList: 0,
+      samples: { underline: [], font: [], allCaps: [], emptyList: [] }
+    };
 
     progress('Leyendo documentos');
     const refZip = await runStep('Leyendo referente', () => loadDocxZip(refFile, 'referente'));
@@ -1592,12 +1595,37 @@
    * Devuelve contadores por tipo de corrección.
    */
   function applyNormativaFixesDom(doc) {
-    const fixes = { underline: 0, font: 0, allCaps: 0, emptyList: 0 };
+    const fixes = {
+      underline: 0, font: 0, allCaps: 0, emptyList: 0,
+      samples: { underline: [], font: [], allCaps: [], emptyList: [] }
+    };
+    const MAX_SAMPLES = 3;
+    const SNIPPET_LEN = 80;
     const body = doc.getElementsByTagName('w:body')[0];
     if (!body) return fixes;
 
     const isTitleStyle = (styleId) => /^FHJTtulo/.test(styleId || '');
     const bodyRuns = Array.from(body.getElementsByTagName('w:r'));
+
+    function findParentP(node) {
+      let n = node && node.parentNode;
+      while (n && n.nodeType === 1) {
+        if (n.localName === 'p' || n.nodeName === 'w:p') return n;
+        n = n.parentNode;
+      }
+      return null;
+    }
+
+    function pushSample(bucket, text, extra) {
+      if (!bucket || bucket.length >= MAX_SAMPLES) return;
+      const trimmed = String(text || '').replace(/\s+/g, ' ').trim();
+      if (!trimmed) return;
+      const snippet = trimmed.length > SNIPPET_LEN
+        ? trimmed.slice(0, SNIPPET_LEN - 1) + '…'
+        : trimmed;
+      const entry = extra ? Object.assign({ text: snippet }, extra) : { text: snippet };
+      bucket.push(entry);
+    }
 
     // 1) Underline: borrar <w:u> de los rPr del body.
     for (const r of bodyRuns) {
@@ -1607,8 +1635,11 @@
       if (!u) continue;
       const val = u.getAttributeNS(W_NS, 'val') || u.getAttribute('w:val') || 'single';
       if (val === 'none') continue;
+      const parentP = findParentP(r);
+      const paraText = parentP ? normalizeParagraphText(getParagraphTextDom(parentP)) : '';
       rPr.removeChild(u);
       fixes.underline++;
+      pushSample(fixes.samples.underline, paraText);
     }
 
     // 2) Fuentes no-Arial: reescribir ascii/hAnsi/cs a Arial.
@@ -1618,15 +1649,22 @@
       const rFonts = firstChildByName(rPr, 'w:rFonts');
       if (!rFonts) continue;
       let changed = false;
+      let originalFont = null;
       const attrs = ['ascii', 'hAnsi', 'cs'];
       for (const attr of attrs) {
         const cur = rFonts.getAttributeNS(W_NS, attr) || rFonts.getAttribute('w:' + attr);
         if (cur && !/^Arial\b/i.test(cur)) {
+          if (!originalFont) originalFont = cur;
           rFonts.setAttributeNS(W_NS, 'w:' + attr, 'Arial');
           changed = true;
         }
       }
-      if (changed) fixes.font++;
+      if (changed) {
+        fixes.font++;
+        const parentP = findParentP(r);
+        const paraText = parentP ? normalizeParagraphText(getParagraphTextDom(parentP)) : '';
+        pushSample(fixes.samples.font, paraText, { font: originalFont });
+      }
     }
 
     // 3) ALL-CAPS body: descapitalizar párrafos no-título en mayúsculas.
@@ -1641,6 +1679,8 @@
       const upperLetters = text.replace(/[^A-ZÁÉÍÓÚÑ]/g, '').length;
       const ratio = upperLetters / letters.length;
       if (ratio < 0.9) continue;
+
+      pushSample(fixes.samples.allCaps, text);
 
       const ts = p.getElementsByTagName('w:t');
       let firstDone = false;
@@ -1673,6 +1713,7 @@
       if (p.parentNode) {
         p.parentNode.removeChild(p);
         fixes.emptyList++;
+        pushSample(fixes.samples.emptyList, '(ítem vacío con estilo ' + styleId + ')');
       }
     }
 
@@ -1980,9 +2021,23 @@
     const codeMatch = joinedText.match(/\bP\.\d{2}\.\d{2}\.\d{3,}\b/);
     const code = codeMatch ? codeMatch[0] : null;
 
-    // Versión: "V.d" o "V.d.d"
-    const versionMatch = joinedText.match(/\bV\.\d+(?:\.\d+)?\b/);
-    const version = versionMatch ? versionMatch[0] : null;
+    // Versión: varios formatos frecuentes
+    //   V.d, V.d.d, V d, Vd                  → "V.X"
+    //   Versión d, Versión d.d               → tal cual
+    //   Edición d, Edición d.d               → tal cual
+    //   Rev. d, Rev d, Revisión d            → tal cual
+    const versionPatterns = [
+      /\bV\.\s?\d+(?:\.\d+)?\b/i,
+      /\bV\s\d+(?:\.\d+)?\b/i,
+      /\bVersi[oó]n\s+\d+(?:\.\d+)?\b/i,
+      /\bEdici[oó]n\s+\d+(?:\.\d+)?\b/i,
+      /\bRev(?:\.|isi[oó]n)?\s+\d+(?:\.\d+)?\b/i
+    ];
+    let version = null;
+    for (const re of versionPatterns) {
+      const m = joinedText.match(re);
+      if (m) { version = m[0].trim(); break; }
+    }
 
     // Título: primer párrafo razonable que no sea código/versión, que no empiece
     // por numeración ni por ANEXO, y con longitud 6..200.
@@ -2022,7 +2077,14 @@
     }
   }
 
-  const api = { process, inspectContent, IsoformaError };
+  // Alias descriptivo: `extractMetadata(file)` devuelve solo `detected`
+  // porque el contexto de uso es "rellenar el formulario".
+  async function extractMetadata(input) {
+    const res = await inspectContent(input);
+    return res && res.detected ? res.detected : { code: null, version: null, title: null };
+  }
+
+  const api = { process, inspectContent, extractMetadata, IsoformaError };
   if (isNode) {
     module.exports = api;
   } else {

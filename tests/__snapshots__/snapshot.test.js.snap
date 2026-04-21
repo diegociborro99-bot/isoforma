@@ -34,6 +34,12 @@ exports[`snapshot — document.xml post-procesado > produce una huella determini
       "allCaps": 0,
       "emptyList": 0,
       "font": 0,
+      "samples": {
+        "allCaps": [],
+        "emptyList": [],
+        "font": [],
+        "underline": [],
+      },
       "underline": 0,
     },
     "list": 2,

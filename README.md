@@ -89,11 +89,19 @@ Self-contained. Sin build step, sin dependencias locales. Librerías JSZip y Fil
 
 ## Versión
 
-v0.8.0 · Engine v1.6 — abril 2026
+v0.9.0 · Engine v1.7 — abril 2026
 Fundación Hospital de Jove · Servicio de Laboratorio
 
 ## Changelog
 
+- **v0.9.0 · Engine v1.7 (Fase 9)** — Transparencia y extracción de metadatos:
+  - `extractMetadata(file)` como alias descriptivo de `inspectContent` (devuelve solo `{ code, version, title }`).
+  - Patrones de versión extendidos: además del clásico `V.1.2`, ahora detecta `Versión 1.0`, `Edición 2`, `Rev. 3`, `Revisión 4`.
+  - `stats.fixes.samples` — el auto-fix ahora devuelve hasta 3 snippets de texto (truncados a 80 chars) por cada tipo de corrección, para que la UI pueda mostrar evidencia concreta de qué cambió.
+  - `samples.font` incluye el nombre de la fuente original (`{ text, font }`).
+  - UI: bloque "Correcciones aplicadas automáticamente" con chips visuales por tipo + sección expandible "Ver ejemplos concretos" que muestra los snippets capturados.
+  - UI: etiquetas bumped a v0.9.
+  - Tests: 14 nuevos en `tests/phase9.test.js` (123 total verdes).
 - **v0.8.0 · Engine v1.6 (Fase 8)** — Auto-fix normativo opt-in:
   - Nueva opción `autoFix: true` en `process()` que repara en DOM las 4 infracciones normativas más comunes antes del validador:
     - Subrayado en cuerpo → elimina `<w:u>`.
