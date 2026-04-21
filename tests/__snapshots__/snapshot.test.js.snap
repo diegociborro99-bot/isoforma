@@ -1,0 +1,41 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`snapshot — document.xml post-procesado > produce una huella determinista sobre un input sintético fijo 1`] = `
+{
+  "fingerprint": {
+    "bodyParagraphCount": 16,
+    "bodyTableCount": 2,
+    "bookmarkEndIds": [],
+    "bookmarkStartIds": [],
+    "firstSectPr": "<w:sectPr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:headerReference w:type="even" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId5"/><w:headerReference w:type="default" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId6"/><w:footerReference w:type="even" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId8"/><w:footerReference w:type="default" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId9"/><w:headerReference w:type="first" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId7"/><w:footerReference w:type="first" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId10"/><w:pgSz w:w="11906" w:h="16838" w:code="9"/><w:pgMar w:top="1418" w:right="1418" w:bottom="1418" w:left="1701" w:header="709" w:footer="709" w:gutter="0"/><w:cols w:space="708"/><w:docGrid w:linePitch="360"/></w:sectPr>",
+    "pStyleSequence": [
+      "FHJTtulo1",
+      "FHJPrrafo",
+      "FHJTtulo1",
+      "FHJPrrafo",
+      "FHJTtulo1",
+      "FHJPrrafo",
+      "FHJTtulo1",
+      "FHJTtuloprrafo",
+      "FHJPrrafo",
+      "FHJTtuloprrafo",
+      "FHJVietaNivel1",
+      "FHJVietaNivel1",
+      "FHJTtulo1",
+      "FHJPrrafo",
+      null,
+      "FHJPrrafo",
+    ],
+  },
+  "stats": {
+    "figures": 1,
+    "paragraph": 5,
+    "preservedHeaders": false,
+    "tables": 1,
+    "titPar": 2,
+    "title1": 4,
+    "vignette": 2,
+  },
+  "warnings": [],
+}
+`;

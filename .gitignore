@@ -1,0 +1,10 @@
+node_modules/
+.DS_Store
+npm-debug.log*
+.vscode/
+.idea/
+dist/
+
+# Fixtures reales — ver tests/fixtures/README.md
+tests/fixtures/*
+!tests/fixtures/README.md

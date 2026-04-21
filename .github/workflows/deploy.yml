@@ -1,0 +1,66 @@
+name: deploy
+
+"on":
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Permisos mínimos para que actions/deploy-pages@v4 pueda publicar.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Evita despliegues solapados. Si llega un nuevo push mientras otro deploy
+# está en curso, se cancela el antiguo y se queda el último.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build dist/
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # Gate: si los tests fallan, no se publica. Mantenemos el mismo
+      # comando que el workflow `test` para que sea equivalente.
+      - name: Run vitest
+        run: npm test -- --reporter=default
+
+      - name: Build minified dist/
+        run: npm run build
+
+      - name: Smoke test minified engine
+        run: node scripts/smoke.js
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
