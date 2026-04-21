@@ -89,11 +89,20 @@ Self-contained. Sin build step, sin dependencias locales. Librerías JSZip y Fil
 
 ## Versión
 
-v0.9.0 · Engine v1.7 — abril 2026
+v0.10.0 · Engine v1.8 — abril 2026
 Fundación Hospital de Jove · Servicio de Laboratorio
 
 ## Changelog
 
+- **v0.10.0 · Engine v1.8 (Fase 10)** — Modo lote + auto-fix nivel 2 + validador reforzado:
+  - **Modo lote**: nuevo toggle en la UI que permite seleccionar (o soltar) N documentos `.docx` contra el mismo referente de una sola vez. El resultado es un `.zip` que contiene todos los documentos formateados + un `_resumen_lote.csv` con estado, fixes y warnings por archivo. En lote los metadatos se autodetectan de cada documento (no se rellenan manualmente).
+  - **Auto-fix nivel 2** — tres nuevas correcciones automáticas (opt-in, activas con `autoFix: true`):
+    - `blankParas`: colapsa cualquier cluster de párrafos vacíos consecutivos a uno solo.
+    - `multiSpace`: dentro de cada `w:t`, sustituye secuencias de 2+ espacios ASCII por uno.
+    - `renumbered`: detecta huecos en la numeración de `FHJTtulo1` (p. ej. 1, 2, 4) y reescribe el prefijo numérico al valor correcto. No toca `ANEXO` ni títulos sin prefijo numérico.
+  - **Validador reforzado** — nuevo warning `NORMATIVA_PLACEHOLDER_UNFILLED` que detecta placeholders típicos sin rellenar en el cuerpo: `[CODIGO]`, `[TITULO]`, `[VERSION]`, `[FECHA]`, `XXXXX`, `[XX.XX.XX]`, `<<...>>`, `[xxx]`. Evidencia los casos concretos en `context.samples` para la UI.
+  - Contadores y `samples` para cada nuevo tipo en `stats.fixes` (`blankParas`, `multiSpace`, `renumbered`) con la misma mecánica que Fase 9 (MAX 3 por tipo, 80 chars, elipsis).
+  - Tests: 13 nuevos en `tests/phase10.test.js` (136 total verdes).
 - **v0.9.0 · Engine v1.7 (Fase 9)** — Transparencia y extracción de metadatos:
   - `extractMetadata(file)` como alias descriptivo de `inspectContent` (devuelve solo `{ code, version, title }`).
   - Patrones de versión extendidos: además del clásico `V.1.2`, ahora detecta `Versión 1.0`, `Edición 2`, `Rev. 3`, `Revisión 4`.

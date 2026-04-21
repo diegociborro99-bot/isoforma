@@ -268,6 +268,26 @@ section{position:relative;padding:120px 0;z-index:2}
 .status-log.error .err-body{font-family:'DM Sans',sans-serif;letter-spacing:0;text-transform:none;font-size:13.5px;color:#7A2626;line-height:1.5}
 .status-log.error .err-meta{font-size:10px;color:#B23838;opacity:.7;letter-spacing:.12em}
 
+/* Batch result */
+.batch-result{background:var(--white);border:1px solid var(--line);padding:0;display:none;position:relative;overflow:hidden;margin-top:20px}
+.batch-result.show{display:block;animation:rise .7s var(--ease)}
+.batch-result::before{content:'';position:absolute;top:0;left:50%;width:200%;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);transform:translateX(-50%);opacity:.3}
+.batch-result-header{padding:56px 56px 40px;text-align:center;border-bottom:1px solid var(--line-soft)}
+.batch-result-header h3{font-family:'Instrument Serif',serif;font-size:42px;margin-bottom:10px;font-weight:400;letter-spacing:-.02em;color:var(--ink);line-height:1}
+.batch-result-header p{color:var(--ink-soft);font-size:16px;max-width:500px;margin:0 auto;line-height:1.6}
+.batch-table-wrap{padding:24px 56px;overflow-x:auto}
+.batch-table{width:100%;border-collapse:collapse;font-family:'DM Sans',sans-serif;font-size:13.5px}
+.batch-table thead th{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-mute);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+.batch-table tbody td{padding:12px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink-soft);vertical-align:top}
+.batch-table tbody tr:last-child td{border-bottom:0}
+.batch-table .b-file{color:var(--ink);font-weight:500;max-width:320px;overflow-wrap:anywhere}
+.batch-table .b-ok{color:var(--success);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+.batch-table .b-err{color:#B23838;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+.batch-table .b-num{font-family:'JetBrains Mono',monospace;color:var(--accent);font-size:12.5px}
+.batch-table .b-warn{font-family:'JetBrains Mono',monospace;color:var(--gold);font-size:12.5px}
+.batch-table .b-err-msg{font-family:'DM Sans',sans-serif;font-size:12px;color:#B23838;margin-top:4px;line-height:1.4}
+.dropzone.batch-mode .drop-title::after{content:' (varios)';color:var(--accent);font-style:italic;font-family:'Instrument Serif',serif}
+
 /* Features */
 .features-section{background:var(--white);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 .features-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0;margin-top:40px;border-left:1px solid var(--line);border-top:1px solid var(--line)}
@@ -395,7 +415,7 @@ input[type=file]{display:none}
     <div class="hero-content">
       <div class="hero-eyebrow">
         <span class="hero-eyebrow-dot"></span>
-        Fundación Hospital de Jove · v0.9 beta
+        Fundación Hospital de Jove · v0.10 beta
       </div>
       <h1>
         <span class="line"><span class="line-inner">Un documento,</span></span>
@@ -526,6 +546,16 @@ input[type=file]{display:none}
       </label>
     </div>
 
+    <div class="options-row reveal">
+      <label class="toggle">
+        <input type="checkbox" id="optBatch">
+        <span class="toggle-text">
+          <span class="toggle-title">Modo lote — varios documentos con el mismo referente</span>
+          <span class="toggle-hint">Procesa N documentos contra el mismo referente de una sola vez. Los metadatos de cada documento se autodetectan. El resultado es un .zip con los docx formateados + un CSV de resumen.</span>
+        </span>
+      </label>
+    </div>
+
     <div class="action-row reveal">
       <div class="privacy-note">
         <svg class="privacy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
@@ -576,6 +606,42 @@ input[type=file]{display:none}
       <div class="result-warnings" id="resultWarnings">
         <div class="result-warnings-title">Avisos no bloqueantes</div>
         <ul id="resultWarningsList"></ul>
+      </div>
+    </div>
+
+    <div class="batch-result" id="batchResult">
+      <div class="batch-result-header">
+        <svg class="success-icon" viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="28" cy="28" r="24" opacity="0.2"/>
+          <circle cx="28" cy="28" r="24"/>
+          <path d="M18 28l7 7 14-14"/>
+        </svg>
+        <h3>Lote procesado.</h3>
+        <p id="batchSummaryText">—</p>
+      </div>
+      <div class="batch-table-wrap">
+        <table class="batch-table">
+          <thead>
+            <tr>
+              <th>Archivo</th>
+              <th>Estado</th>
+              <th>Fixes</th>
+              <th>Warnings</th>
+              <th>Tamaño</th>
+            </tr>
+          </thead>
+          <tbody id="batchTableBody"></tbody>
+        </table>
+      </div>
+      <div class="result-actions">
+        <button class="btn-primary" id="btnDownloadZip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          <span>Descargar .zip con todo</span>
+        </button>
+        <button class="btn-ghost" id="btnResetBatch">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+          <span>Empezar otro lote</span>
+        </button>
       </div>
     </div>
   </div>
@@ -675,7 +741,7 @@ input[type=file]{display:none}
       </div>
     </div>
     <div class="footer-bottom">
-      <span>Isoforma · v0.9</span>
+      <span>Isoforma · v0.10</span>
       <span>Fundación Hospital de Jove · 2026</span>
     </div>
     <div class="footer-signature">vibe coded with <span class="heart">&#9829;</span> by <em>Highkey Labs</em></div>
@@ -730,7 +796,18 @@ document.querySelectorAll('.faq-item').forEach(item => {
 });
 
 // ISOFORMA LOGIC
-const state = { refFile: null, contentFile: null, outputBlob: null, outputName: 'documento_formateado.docx', startTime: 0, warnings: [] };
+const state = {
+  mode: 'single',
+  refFile: null,
+  contentFile: null,
+  contentFiles: [],
+  outputBlob: null,
+  outputName: 'documento_formateado.docx',
+  startTime: 0,
+  warnings: [],
+  batchResults: [],
+  batchZipBlob: null
+};
 
 const els = {
   zoneRef: document.getElementById('zoneRef'),
@@ -743,6 +820,7 @@ const els = {
   metaVersion: document.getElementById('metaVersion'),
   metaTitle: document.getElementById('metaTitle'),
   optAutoFix: document.getElementById('optAutoFix'),
+  optBatch: document.getElementById('optBatch'),
   btnProcess: document.getElementById('btnProcess'),
   btnDownload: document.getElementById('btnDownload'),
   btnReset: document.getElementById('btnReset'),
@@ -755,6 +833,11 @@ const els = {
   resultFixesChips: document.getElementById('resultFixesChips'),
   resultFixesDetail: document.getElementById('resultFixesDetail'),
   resultFixesSamples: document.getElementById('resultFixesSamples'),
+  batchResult: document.getElementById('batchResult'),
+  batchTableBody: document.getElementById('batchTableBody'),
+  batchSummaryText: document.getElementById('batchSummaryText'),
+  btnDownloadZip: document.getElementById('btnDownloadZip'),
+  btnResetBatch: document.getElementById('btnResetBatch'),
   uploadsRow: document.getElementById('uploadsRow'),
   statPages: document.getElementById('statPages'),
   statSize: document.getElementById('statSize'),
@@ -762,7 +845,7 @@ const els = {
   steps: { 1: document.getElementById('step1'), 2: document.getElementById('step2'), 3: document.getElementById('step3'), 4: document.getElementById('step4') }
 };
 
-function setupDropZone(zone, input, onFile) {
+function setupDropZone(zone, input, onFile, onMultiFile) {
   zone.addEventListener('mousemove', (e) => {
     const rect = zone.getBoundingClientRect();
     zone.style.setProperty('--x', ((e.clientX - rect.left) / rect.width * 100) + '%');
@@ -775,10 +858,24 @@ function setupDropZone(zone, input, onFile) {
     ev.preventDefault(); ev.stopPropagation(); zone.classList.remove('dragover');
   }));
   zone.addEventListener('drop', (ev) => {
-    if (ev.dataTransfer.files.length > 0) onFile(ev.dataTransfer.files[0]);
+    const files = ev.dataTransfer.files;
+    if (files.length === 0) return;
+    if (onMultiFile && state.mode === 'batch' && files.length > 1) {
+      onMultiFile(Array.from(files));
+    } else if (onMultiFile && state.mode === 'batch') {
+      onMultiFile([files[0]]);
+    } else {
+      onFile(files[0]);
+    }
   });
   input.addEventListener('change', (ev) => {
-    if (ev.target.files.length > 0) onFile(ev.target.files[0]);
+    const files = ev.target.files;
+    if (files.length === 0) return;
+    if (onMultiFile && state.mode === 'batch') {
+      onMultiFile(Array.from(files));
+    } else {
+      onFile(files[0]);
+    }
   });
 }
 
@@ -791,18 +888,39 @@ setupDropZone(els.zoneRef, els.fileRef, (f) => {
   checkReady(); updateConnectorState();
 });
 
-setupDropZone(els.zoneContent, els.fileContent, (f) => {
-  if (!f.name.endsWith('.docx')) { showStatus('Solo archivos .docx', 'error'); return; }
-  state.contentFile = f;
-  els.zoneContent.classList.add('filled');
-  els.fileContentName.textContent = f.name;
-  els.steps[2].classList.add('done');
-  state.outputName = f.name.replace('.docx', '_formateado.docx');
-  checkReady(); updateConnectorState();
-  // Fase 5/6: auto-rellenar metadatos desde inspectContent. No bloqueante,
-  // no critica si falla (el usuario podrá teclear manualmente).
-  tryAutofillFromContent(f);
-});
+setupDropZone(
+  els.zoneContent,
+  els.fileContent,
+  (f) => {
+    if (!f.name.endsWith('.docx')) { showStatus('Solo archivos .docx', 'error'); return; }
+    state.contentFile = f;
+    state.contentFiles = [f];
+    els.zoneContent.classList.add('filled');
+    els.fileContentName.textContent = f.name;
+    els.steps[2].classList.add('done');
+    state.outputName = f.name.replace('.docx', '_formateado.docx');
+    checkReady(); updateConnectorState();
+    // Fase 5/6: auto-rellenar metadatos desde inspectContent. No bloqueante,
+    // no critica si falla (el usuario podrá teclear manualmente).
+    tryAutofillFromContent(f);
+  },
+  (files) => {
+    // Modo lote: validar y almacenar todos los .docx
+    const valid = files.filter(f => f.name.endsWith('.docx'));
+    if (valid.length === 0) { showStatus('Ningún .docx válido en la selección', 'error'); return; }
+    if (valid.length !== files.length) {
+      showStatus(`${files.length - valid.length} archivo(s) ignorado(s) — solo se aceptan .docx`, 'active');
+    }
+    state.contentFiles = valid;
+    state.contentFile = valid[0];
+    els.zoneContent.classList.add('filled');
+    els.fileContentName.textContent = valid.length === 1
+      ? valid[0].name
+      : `${valid[0].name}  ·  +${valid.length - 1} más`;
+    els.steps[2].classList.add('done');
+    checkReady(); updateConnectorState();
+  }
+);
 
 async function tryAutofillFromContent(file) {
   if (!window.IsoformaEngine || typeof window.IsoformaEngine.inspectContent !== 'function') return;
@@ -855,7 +973,24 @@ function updateConnectorState() {
 [els.metaCode, els.metaVersion, els.metaTitle].forEach(input => input.addEventListener('input', checkReady));
 
 function checkReady() {
-  const hasFiles = state.refFile && state.contentFile;
+  const batch = state.mode === 'batch';
+  const hasRef = !!state.refFile;
+  const hasContent = batch ? (state.contentFiles && state.contentFiles.length > 0) : !!state.contentFile;
+  const hasFiles = hasRef && hasContent;
+
+  if (batch) {
+    // En modo lote los metadatos los aporta cada documento → step 3 se considera "hecho" por diseño.
+    if (hasFiles) {
+      els.btnProcess.disabled = false;
+      els.steps[3].classList.add('done');
+      els.steps[3].classList.remove('active');
+    } else {
+      els.btnProcess.disabled = true;
+      els.steps[3].classList.remove('active','done');
+    }
+    return;
+  }
+
   const hasMeta = els.metaCode.value.trim() && els.metaVersion.value.trim() && els.metaTitle.value.trim();
   // Metadatos son opcionales: si hay archivos, se puede procesar
   if (hasFiles) {
@@ -871,6 +1006,47 @@ function checkReady() {
     els.steps[3].classList.remove('active','done');
     els.btnProcess.disabled = true;
   }
+}
+
+// Toggle modo lote: ajusta input.multiple, resetea zona de contenido,
+// oculta metadatos manuales (se autodetectan en lote).
+if (els.optBatch) {
+  els.optBatch.addEventListener('change', (ev) => {
+    const batch = ev.target.checked;
+    state.mode = batch ? 'batch' : 'single';
+    state.contentFiles = [];
+    state.contentFile = null;
+    state.outputBlob = null;
+    state.batchResults = [];
+    state.batchZipBlob = null;
+
+    if (batch) {
+      els.fileContent.setAttribute('multiple', '');
+      els.zoneContent.classList.add('batch-mode');
+      if (els.resultPanel) els.resultPanel.classList.remove('show');
+    } else {
+      els.fileContent.removeAttribute('multiple');
+      els.zoneContent.classList.remove('batch-mode');
+      if (els.batchResult) els.batchResult.classList.remove('show');
+    }
+
+    // Limpiamos zona de contenido (la de referencia se mantiene)
+    els.fileContent.value = '';
+    els.zoneContent.classList.remove('filled');
+    els.fileContentName.textContent = '';
+    els.steps[2].classList.remove('done');
+
+    // Ocultamos metadatos manuales en lote — se autodetectan por archivo
+    const metadataSection = document.querySelector('.metadata-section') || els.metaCode.closest('section') || els.metaCode.closest('.options-row');
+    // Como fallback marcamos los 3 inputs con un contenedor padre común
+    [els.metaCode, els.metaVersion, els.metaTitle].forEach(inp => {
+      const field = inp && inp.closest ? inp.closest('.field') : null;
+      if (field) field.style.display = batch ? 'none' : '';
+    });
+
+    checkReady();
+    updateConnectorState();
+  });
 }
 
 function showStatus(msg, type = 'active') {
@@ -1035,56 +1211,223 @@ function formatBytes(bytes) {
   return (bytes/(1024*1024)).toFixed(2) + ' MB';
 }
 
+async function processSingle() {
+  state.startTime = Date.now();
+  const autoFix = !!(els.optAutoFix && els.optAutoFix.checked);
+  const result = await IsoformaEngine.process({
+    refFile: state.refFile,
+    contentFile: state.contentFile,
+    metadata: {
+      code: els.metaCode.value,
+      version: els.metaVersion.value,
+      title: els.metaTitle.value
+    },
+    autoFix,
+    onProgress: (msg) => showStatus(msg, 'active')
+  });
+  state.outputBlob = result.blob;
+  state.stats = result.stats;
+  state.warnings = result.warnings || [];
+
+  els.steps[4].classList.add('done');
+  els.resultPanel.classList.add('show');
+
+  const elapsed = ((Date.now() - state.startTime) / 1000).toFixed(1);
+  const s = result.stats;
+  const styled = s.title1 + s.titPar + s.paragraph + s.vignette;
+  els.statPages.textContent = styled;
+  els.statSize.textContent = formatBytes(result.blob.size);
+  els.statTime.textContent = elapsed + 's';
+  const headerNote = s.preservedHeaders ? 'cabecera propia conservada' : 'cabecera del referente inyectada';
+  const trustNote = (typeof s.preservedStyles === 'number' && s.preservedStyles > 0)
+    ? ` · ${s.preservedStyles} estilos FHJ preservados`
+    : '';
+  const listNote = (typeof s.list === 'number' && s.list > 0)
+    ? ` · ${s.list} listas numeradas`
+    : '';
+  els.resultMeta.textContent =
+    `${headerNote} · ${s.title1} títulos · ${s.titPar} subtítulos · ${s.paragraph} párrafos · ` +
+    `${s.vignette} viñetas${listNote} · ${s.tables} tablas · ${s.figures} figuras` +
+    trustNote;
+
+  renderFixes(s);
+  renderWarnings(state.warnings);
+
+  const okMsg = state.warnings.length
+    ? `Formato aplicado con ${state.warnings.length} aviso${state.warnings.length === 1 ? '' : 's'}`
+    : 'Formato aplicado correctamente';
+  showStatus(okMsg, 'active');
+  setTimeout(() => els.resultPanel.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+}
+
+function csvEscape(v) {
+  const s = (v === null || v === undefined) ? '' : String(v);
+  if (/[",\n;]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function buildBatchSummaryCsv(rows) {
+  const header = ['archivo','estado','error','tamano_bytes','warnings','title1','titPar','paragraph','vignette','tables','figures','fixes_total'];
+  const lines = [header.join(',')];
+  rows.forEach(r => {
+    const s = r.stats || {};
+    const fx = s.fixes || {};
+    const fixesTotal = (fx.underline||0)+(fx.font||0)+(fx.allCaps||0)+(fx.emptyList||0)+(fx.blankParas||0)+(fx.multiSpace||0)+(fx.renumbered||0);
+    lines.push([
+      csvEscape(r.name),
+      r.ok ? 'OK' : 'ERROR',
+      csvEscape(r.ok ? '' : (r.errorMsg || '')),
+      r.ok ? r.size : '',
+      r.ok ? (r.warnings || 0) : '',
+      r.ok ? (s.title1 || 0) : '',
+      r.ok ? (s.titPar || 0) : '',
+      r.ok ? (s.paragraph || 0) : '',
+      r.ok ? (s.vignette || 0) : '',
+      r.ok ? (s.tables || 0) : '',
+      r.ok ? (s.figures || 0) : '',
+      r.ok ? fixesTotal : ''
+    ].join(','));
+  });
+  return lines.join('\n');
+}
+
+function renderBatchTable(rows) {
+  if (!els.batchTableBody) return;
+  els.batchTableBody.innerHTML = '';
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    const tdFile = document.createElement('td');
+    tdFile.className = 'b-file';
+    tdFile.textContent = r.name;
+    tr.appendChild(tdFile);
+
+    const tdStatus = document.createElement('td');
+    if (r.ok) {
+      const ok = document.createElement('span');
+      ok.className = 'b-ok';
+      ok.textContent = 'OK';
+      tdStatus.appendChild(ok);
+    } else {
+      const err = document.createElement('span');
+      err.className = 'b-err';
+      err.textContent = 'Error';
+      tdStatus.appendChild(err);
+      const msg = document.createElement('div');
+      msg.className = 'b-err-msg';
+      msg.textContent = r.errorMsg || '—';
+      tdStatus.appendChild(msg);
+    }
+    tr.appendChild(tdStatus);
+
+    const tdFixes = document.createElement('td');
+    tdFixes.className = 'b-num';
+    if (r.ok) {
+      const fx = (r.stats && r.stats.fixes) || {};
+      const t = (fx.underline||0)+(fx.font||0)+(fx.allCaps||0)+(fx.emptyList||0)+(fx.blankParas||0)+(fx.multiSpace||0)+(fx.renumbered||0);
+      tdFixes.textContent = t;
+    } else tdFixes.textContent = '—';
+    tr.appendChild(tdFixes);
+
+    const tdWarn = document.createElement('td');
+    tdWarn.className = 'b-warn';
+    tdWarn.textContent = r.ok ? (r.warnings || 0) : '—';
+    tr.appendChild(tdWarn);
+
+    const tdSize = document.createElement('td');
+    tdSize.className = 'b-num';
+    tdSize.textContent = r.ok ? formatBytes(r.size) : '—';
+    tr.appendChild(tdSize);
+
+    els.batchTableBody.appendChild(tr);
+  });
+}
+
+async function processBatch() {
+  state.startTime = Date.now();
+  const autoFix = !!(els.optAutoFix && els.optAutoFix.checked);
+  const refBuffer = await state.refFile.arrayBuffer(); // se reutiliza
+  const files = state.contentFiles.slice();
+  const rows = [];
+  const zip = new JSZip();
+  const usedNames = new Set();
+
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    showStatus(`[${i + 1}/${files.length}] Procesando ${f.name}…`, 'active');
+    try {
+      const result = await IsoformaEngine.process({
+        refFile: refBuffer,
+        contentFile: f,
+        autoFix,
+        outputType: 'blob'
+      });
+      const blob = result.blob;
+      let outName = f.name.replace(/\.docx$/i, '') + '_formateado.docx';
+      // Evitar colisiones (si hay dos archivos con el mismo nombre)
+      let tryName = outName;
+      let n = 2;
+      while (usedNames.has(tryName)) {
+        tryName = outName.replace(/\.docx$/i, '') + '_' + n + '.docx';
+        n++;
+      }
+      outName = tryName;
+      usedNames.add(outName);
+      zip.file(outName, blob);
+      rows.push({
+        name: f.name,
+        ok: true,
+        size: blob.size,
+        warnings: (result.warnings || []).length,
+        stats: result.stats
+      });
+    } catch (err) {
+      console.error('Fallo procesando', f.name, err);
+      rows.push({
+        name: f.name,
+        ok: false,
+        errorMsg: (err && err.message) ? err.message : 'Error inesperado'
+      });
+    }
+  }
+
+  // Añadir CSV resumen al zip
+  const csv = buildBatchSummaryCsv(rows);
+  zip.file('_resumen_lote.csv', csv);
+
+  showStatus('Comprimiendo .zip…', 'active');
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+
+  state.batchZipBlob = zipBlob;
+  state.batchResults = rows;
+
+  // Pintar tabla + resumen
+  renderBatchTable(rows);
+  const okCount = rows.filter(r => r.ok).length;
+  const errCount = rows.length - okCount;
+  const elapsed = ((Date.now() - state.startTime) / 1000).toFixed(1);
+  if (els.batchSummaryText) {
+    els.batchSummaryText.textContent =
+      `${okCount} formateados · ${errCount} con error · ${formatBytes(zipBlob.size)} · ${elapsed}s`;
+  }
+
+  els.steps[4].classList.add('done');
+  if (els.batchResult) els.batchResult.classList.add('show');
+  showStatus(`Lote procesado: ${okCount}/${rows.length} OK`, 'active');
+  setTimeout(() => els.batchResult && els.batchResult.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+}
+
 els.btnProcess.addEventListener('click', async () => {
   els.btnProcess.classList.add('loading');
   els.btnProcess.disabled = true;
-  state.startTime = Date.now();
   try {
-    const autoFix = !!(els.optAutoFix && els.optAutoFix.checked);
-    const result = await IsoformaEngine.process({
-      refFile: state.refFile,
-      contentFile: state.contentFile,
-      metadata: {
-        code: els.metaCode.value,
-        version: els.metaVersion.value,
-        title: els.metaTitle.value
-      },
-      autoFix,
-      onProgress: (msg) => showStatus(msg, 'active')
-    });
-    state.outputBlob = result.blob;
-    state.stats = result.stats;
-    state.warnings = result.warnings || [];
-
-    els.steps[4].classList.add('done');
-    els.resultPanel.classList.add('show');
-
-    const elapsed = ((Date.now() - state.startTime) / 1000).toFixed(1);
-    const s = result.stats;
-    const styled = s.title1 + s.titPar + s.paragraph + s.vignette;
-    els.statPages.textContent = styled;
-    els.statSize.textContent = formatBytes(result.blob.size);
-    els.statTime.textContent = elapsed + 's';
-    const headerNote = s.preservedHeaders ? 'cabecera propia conservada' : 'cabecera del referente inyectada';
-    const trustNote = (typeof s.preservedStyles === 'number' && s.preservedStyles > 0)
-      ? ` · ${s.preservedStyles} estilos FHJ preservados`
-      : '';
-    const listNote = (typeof s.list === 'number' && s.list > 0)
-      ? ` · ${s.list} listas numeradas`
-      : '';
-    els.resultMeta.textContent =
-      `${headerNote} · ${s.title1} títulos · ${s.titPar} subtítulos · ${s.paragraph} párrafos · ` +
-      `${s.vignette} viñetas${listNote} · ${s.tables} tablas · ${s.figures} figuras` +
-      trustNote;
-
-    renderFixes(s);
-    renderWarnings(state.warnings);
-
-    const okMsg = state.warnings.length
-      ? `Formato aplicado con ${state.warnings.length} aviso${state.warnings.length === 1 ? '' : 's'}`
-      : 'Formato aplicado correctamente';
-    showStatus(okMsg, 'active');
-    setTimeout(() => els.resultPanel.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+    if (state.mode === 'batch') {
+      // Oculta panel single si quedaba de una corrida previa
+      if (els.resultPanel) els.resultPanel.classList.remove('show');
+      await processBatch();
+    } else {
+      if (els.batchResult) els.batchResult.classList.remove('show');
+      await processSingle();
+    }
   } catch (err) {
     console.error(err);
     showError(err);
@@ -1099,11 +1442,45 @@ els.btnDownload.addEventListener('click', () => {
   if (state.outputBlob) saveAs(state.outputBlob, state.outputName);
 });
 
+if (els.btnDownloadZip) {
+  els.btnDownloadZip.addEventListener('click', () => {
+    if (state.batchZipBlob) saveAs(state.batchZipBlob, 'isoforma_lote.zip');
+  });
+}
+
+function resetBatchUI() {
+  state.contentFiles = [];
+  state.contentFile = null;
+  state.batchZipBlob = null;
+  state.batchResults = [];
+  els.zoneContent.classList.remove('filled');
+  els.fileContent.value = '';
+  els.fileContentName.textContent = '';
+  els.steps[2].classList.remove('done');
+  els.steps[4].classList.remove('done');
+  if (els.batchResult) els.batchResult.classList.remove('show');
+  if (els.batchTableBody) els.batchTableBody.innerHTML = '';
+  if (els.batchSummaryText) els.batchSummaryText.textContent = '—';
+  els.statusLog.textContent = '';
+  els.statusLog.className = 'status-log';
+  checkReady();
+}
+
+if (els.btnResetBatch) {
+  els.btnResetBatch.addEventListener('click', () => {
+    resetBatchUI();
+    document.getElementById('procesador').scrollIntoView({ behavior: 'smooth' });
+  });
+}
+
 els.btnReset.addEventListener('click', () => {
   state.refFile = null;
   state.contentFile = null;
+  state.contentFiles = [];
   state.outputBlob = null;
   state.warnings = [];
+  state.batchResults = [];
+  state.batchZipBlob = null;
   els.zoneRef.classList.remove('filled');
   els.zoneContent.classList.remove('filled');
   els.uploadsRow.classList.remove('filled-both');
@@ -1116,6 +1493,8 @@ els.btnReset.addEventListener('click', () => {
   els.resultPanel.classList.remove('show');
   els.resultWarnings.classList.remove('show');
   els.resultWarningsList.innerHTML = '';
+  if (els.batchResult) els.batchResult.classList.remove('show');
+  if (els.batchTableBody) els.batchTableBody.innerHTML = '';
   if (els.resultFixes) els.resultFixes.classList.remove('show');
   if (els.resultFixesChips) els.resultFixesChips.innerHTML = '';
   if (els.resultFixesSamples) els.resultFixesSamples.innerHTML = '';

@@ -1,5 +1,5 @@
 /**
- * Isoforma Engine v1.7
+ * Isoforma Engine v1.8
  * Motor de transformación de documentos PNT del Hospital de Jove.
  *
  * Comportamiento:
@@ -231,7 +231,11 @@
     const warnings = [];
     let fixes = {
       underline: 0, font: 0, allCaps: 0, emptyList: 0,
-      samples: { underline: [], font: [], allCaps: [], emptyList: [] }
+      blankParas: 0, multiSpace: 0, renumbered: 0,
+      samples: {
+        underline: [], font: [], allCaps: [], emptyList: [],
+        blankParas: [], multiSpace: [], renumbered: []
+      }
     };
 
     progress('Leyendo documentos');
@@ -1597,7 +1601,11 @@
   function applyNormativaFixesDom(doc) {
     const fixes = {
       underline: 0, font: 0, allCaps: 0, emptyList: 0,
-      samples: { underline: [], font: [], allCaps: [], emptyList: [] }
+      blankParas: 0, multiSpace: 0, renumbered: 0,
+      samples: {
+        underline: [], font: [], allCaps: [], emptyList: [],
+        blankParas: [], multiSpace: [], renumbered: []
+      }
     };
     const MAX_SAMPLES = 3;
     const SNIPPET_LEN = 80;
@@ -1714,6 +1722,89 @@
         p.parentNode.removeChild(p);
         fixes.emptyList++;
         pushSample(fixes.samples.emptyList, '(ítem vacío con estilo ' + styleId + ')');
+      }
+    }
+
+    // 5) Fase 10B: párrafos en blanco consecutivos → colapsar a 1.
+    //    Un párrafo "en blanco" no tiene texto, no tiene drawing/pict, y no es
+    //    una lista (ya tratada arriba). Dejamos siempre uno de cada cluster.
+    const freshParagraphs = Array.from(body.getElementsByTagName('w:p'));
+    let blankRun = 0;
+    for (const p of freshParagraphs) {
+      const text = normalizeParagraphText(getParagraphTextDom(p));
+      const hasDrawing = p.getElementsByTagName('w:drawing').length > 0 ||
+                         p.getElementsByTagName('w:pict').length > 0;
+      const hasTable = p.getElementsByTagName('w:tbl').length > 0;
+      const isBlank = !text && !hasDrawing && !hasTable;
+      if (isBlank) {
+        blankRun++;
+        if (blankRun > 1 && p.parentNode) {
+          p.parentNode.removeChild(p);
+          fixes.blankParas = (fixes.blankParas || 0) + 1;
+          pushSample(fixes.samples.blankParas, '(párrafo en blanco duplicado)');
+        }
+      } else {
+        blankRun = 0;
+      }
+    }
+
+    // 6) Fase 10B: espacios múltiples dentro de texto → colapsar a 1.
+    //    No tocamos NBSP (\u00A0) ni whitespace de preservación explícita
+    //    (xml:space="preserve" con espacio único al inicio/fin sigue siendo
+    //    válido; solo colapsamos secuencias de 2+ espacios ASCII dentro).
+    const allTextNodes = body.getElementsByTagName('w:t');
+    for (let i = 0; i < allTextNodes.length; i++) {
+      const node = allTextNodes[i];
+      const original = node.textContent || '';
+      if (!/  +/.test(original)) continue;
+      const collapsed = original.replace(/ {2,}/g, ' ');
+      if (collapsed !== original) {
+        node.textContent = collapsed;
+        fixes.multiSpace = (fixes.multiSpace || 0) + 1;
+        pushSample(fixes.samples.multiSpace, original.trim());
+      }
+    }
+
+    // 7) Fase 10B: renumerar FHJTtulo1 con huecos.
+    //    Solo tocamos títulos cuyo texto empieza por "N" + separador, donde N
+    //    es un entero. No tocamos ANEXO (que usa romanos/letras) ni títulos
+    //    sin prefijo numérico.
+    const currentParagraphs = Array.from(body.getElementsByTagName('w:p'));
+    const titleItems = [];
+    for (const p of currentParagraphs) {
+      const styleId = getExistingPStyle(p);
+      if (styleId !== 'FHJTtulo1') continue;
+      const text = normalizeParagraphText(getParagraphTextDom(p));
+      if (!text) continue;
+      if (/^ANEXO\b/i.test(text)) continue;
+      const m = text.match(/^(\d+)([\.\-\)]+\s*|\s+)(.*)$/);
+      if (!m) continue;
+      titleItems.push({ p, current: parseInt(m[1], 10), sep: m[2], rest: m[3], text });
+    }
+    if (titleItems.length >= 2) {
+      const hasGap = titleItems.some((t, idx) => t.current !== idx + 1);
+      if (hasGap) {
+        for (let idx = 0; idx < titleItems.length; idx++) {
+          const item = titleItems[idx];
+          const desired = idx + 1;
+          if (item.current === desired) continue;
+          const ts = item.p.getElementsByTagName('w:t');
+          let rewrote = false;
+          for (let j = 0; j < ts.length; j++) {
+            const t = ts[j].textContent || '';
+            const im = t.match(/^(\s*)(\d+)(.*)$/);
+            if (im) {
+              ts[j].textContent = im[1] + desired + im[3];
+              rewrote = true;
+              break;
+            }
+          }
+          if (rewrote) {
+            fixes.renumbered = (fixes.renumbered || 0) + 1;
+            pushSample(fixes.samples.renumbered,
+              `${item.current} → ${desired}: ${item.text.slice(0, 60)}`);
+          }
+        }
       }
     }
 
@@ -1854,6 +1945,47 @@
         code: 'NORMATIVA_FONT_NON_ARIAL',
         message: 'Se detectaron fuentes distintas de Arial en el cuerpo (' + totalNonArial + ' runs). La normativa exige Arial 10 para todo el cuerpo.',
         context: { fonts: Object.fromEntries(nonArial.slice(0, 8)) }
+      });
+    }
+
+    // 6) Fase 10B: placeholders sin rellenar.
+    //    Patrones típicos del referente que nadie sustituyó por el valor real:
+    //      [CODIGO], [CÓDIGO], [TITULO], [TÍTULO], [VERSION], [VERSIÓN],
+    //      [XX.XX.XX], XXXXX, XXXXXX, [xxxx], <<...>>
+    const placeholderPatterns = [
+      /\[C[OÓ]DIGO\]/i,
+      /\[T[IÍ]TULO\]/i,
+      /\[VERSI[OÓ]N\]/i,
+      /\[FECHA(?:\s+DE\s+ENTRADA)?\]/i,
+      /\bX{5,}\b/,
+      /\[X{2,}(?:\.X{2,}){1,}\]/i,
+      /<<[^<>\n]{2,50}>>/,
+      /\[[a-z_]{2,20}\]/i  // e.g., [nombre], [cargo] — genérico
+    ];
+    const foundPlaceholders = new Set();
+    const allBodyTexts = [];
+    const allBodyParas = Array.from(body.getElementsByTagName('w:p'));
+    for (const p of allBodyParas) {
+      const text = (getParagraphTextDom(p) || '').trim();
+      if (text) allBodyTexts.push(text);
+    }
+    const joinedBody = allBodyTexts.join(' \n ');
+    for (const re of placeholderPatterns) {
+      let m;
+      const globalRe = new RegExp(re.source, re.flags.replace('g', '') + 'g');
+      while ((m = globalRe.exec(joinedBody)) !== null) {
+        foundPlaceholders.add(m[0]);
+        if (foundPlaceholders.size >= 20) break;
+      }
+      if (foundPlaceholders.size >= 20) break;
+    }
+    if (foundPlaceholders.size > 0) {
+      const samples = Array.from(foundPlaceholders).slice(0, 8);
+      warnings.push({
+        code: 'NORMATIVA_PLACEHOLDER_UNFILLED',
+        message: 'Se encontraron placeholders sin rellenar en el cuerpo (ej.: ' +
+                 samples.join(', ') + '). Sustituye los marcadores por el valor real.',
+        context: { samples }
       });
     }
 
