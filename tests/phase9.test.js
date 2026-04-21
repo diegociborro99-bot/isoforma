@@ -20,7 +20,16 @@ const IsoformaEngine = require('../isoforma-engine.js');
 const { extractMetadata, inspectContent } = IsoformaEngine;
 
 async function runFixed(opts) {
-  return IsoformaEngine.process({ outputType: 'nodebuffer', autoFix: true, ...opts });
+  // Fase 12 B2/B6 enforcement corre ANTES del autoFix y "roba" fixes de fuente.
+  // Desactivamos para que el autoFix clásico (applyNormativaFixesDom) quede
+  // con su trabajo completo y los tests de `stats.fixes.samples` sigan válidos.
+  return IsoformaEngine.process({
+    outputType: 'nodebuffer',
+    autoFix: true,
+    enforceTypography: false,
+    semanticTypography: false,
+    ...opts
+  });
 }
 
 // -----------------------------------------------------------------------------

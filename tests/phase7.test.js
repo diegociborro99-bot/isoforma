@@ -285,7 +285,10 @@ describe('Fase 7 — Bloque D: validador normativo', () => {
         { text: '3.- DESARROLLO', kind: 'plain' }
       ]
     });
-    const { warnings } = await runEngine({ refFile, contentFile });
+    // Fase 12 B2 enforceTypography ya reescribe la fuente automáticamente; aquí
+    // queremos validar que el *validador* detecta la desviación, así que lo
+    // desactivamos para forzar que la fuente Times sobreviva hasta validate().
+    const { warnings } = await runEngine({ refFile, contentFile, enforceTypography: false });
     const codes = warnings.map(w => w.code);
     expect(codes).toContain('NORMATIVA_FONT_NON_ARIAL');
   });

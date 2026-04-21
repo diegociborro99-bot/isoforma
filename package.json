@@ -1,6 +1,6 @@
 {
   "name": "isoforma",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "description": "Herramienta de formateo de PNT del Hospital de Jove. Procesamiento 100% local en el navegador.",
   "main": "isoforma-engine.js",

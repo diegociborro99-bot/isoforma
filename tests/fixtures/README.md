@@ -6,11 +6,14 @@ Esta carpeta es donde van los .docx reales del hospital. **No los subas a git si
 
 Los tests en `tests/fixtures.test.js` buscan estos nombres exactos:
 
-| Archivo               | Descripción                                                              |
-|-----------------------|--------------------------------------------------------------------------|
-| `referente.docx`      | PNT ya formateado del hospital — la fuente del estándar visual.          |
-| `caso-A.docx`         | Documento con cabecera FHJ propia ya rellena (ej: P.02.03.001).          |
-| `caso-B.docx`         | Documento sin cabecera FHJ (ej: Procedimiento analítico Cobas c303).     |
+| Archivo                    | Rol      | Descripción                                                                          |
+|----------------------------|----------|--------------------------------------------------------------------------------------|
+| `ref-gestion-info.docx`    | ref      | PNT canónico bien formateado del hospital (Gestión de Información Documentada).      |
+| `ref-recomendaciones.docx` | ref      | PNT normativo sobre recomendaciones de elaboración de documentos.                    |
+| `content-pnt-claude.docx`  | content  | Documento con 47 imágenes y múltiples secciones — el "stress case" para Fase 7.      |
+| `referente.docx`           | ref      | (Legacy) PNT ya formateado — usado por tests de Fase 5.                              |
+| `caso-A.docx`              | content  | (Legacy) Doc con cabecera FHJ propia.                                                |
+| `caso-B.docx`              | content  | (Legacy) Doc sin cabecera FHJ.                                                       |
 
 Si alguno falta, los tests correspondientes se **saltan automáticamente** con un mensaje claro — el resto de la suite sigue corriendo.
 

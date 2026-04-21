@@ -22,10 +22,25 @@ const require = createRequire(import.meta.url);
 const IsoformaEngine = require('../isoforma-engine.js');
 
 async function runFixed(opts) {
-  return IsoformaEngine.process({ outputType: 'nodebuffer', autoFix: true, ...opts });
+  // Fase 12 B2/B6 enforcement corre ANTES del autoFix y "roba" sus fixes.
+  // Para verificar que el autoFix clásico sigue funcionando, desactivamos
+  // enforceTypography y semanticTypography y dejamos que applyNormativaFixesDom
+  // haga su trabajo íntegro.
+  return IsoformaEngine.process({
+    outputType: 'nodebuffer',
+    autoFix: true,
+    enforceTypography: false,
+    semanticTypography: false,
+    ...opts
+  });
 }
 async function runPlain(opts) {
-  return IsoformaEngine.process({ outputType: 'nodebuffer', ...opts });
+  return IsoformaEngine.process({
+    outputType: 'nodebuffer',
+    enforceTypography: false,
+    semanticTypography: false,
+    ...opts
+  });
 }
 
 async function unpack(buf) {

@@ -89,11 +89,20 @@ Self-contained. Sin build step, sin dependencias locales. Librerías JSZip y Fil
 
 ## Versión
 
-v0.10.0 · Engine v1.8 — abril 2026
+v0.11.0 · Engine v1.9 — abril 2026
 Fundación Hospital de Jove · Servicio de Laboratorio
 
 ## Changelog
 
+- **v0.11.0 · Engine v1.9 (Fase 12)** — Cumplimiento normativo §4 integral (*Recomendaciones para elaboración de documentos*):
+  - **B1 · Enforce espaciado e interlineado §4.3** — nueva pasada `enforceFHJSpacing(doc)` que reescribe `<w:spacing>` por cada estilo FHJ (antes/después/interlineado canónico): `FHJTtulo1` 240/120/1.5, `FHJTtuloprrafo` 240/60/1.5, `FHJPrrafo` 0/120/1.5, `FHJVietaNivel*` 0/60/1.0, `FHJListaNivel*` 0/60/1.0. Forzando `lineRule=auto` y eliminando autospacings huérfanos. Activa por defecto; flag `enforceSpacing: false`.
+  - **B2 · Enforce Arial §4.2.1 / §4.2.3.2** — nueva pasada `enforceArialTypography(doc)` que fuerza `rFonts=Arial` y `sz=20` (10 pt) en todos los runs del cuerpo; detecta párrafos "Fuente: …" bajo tabla y les aplica Arial 9 cursiva (`sz=18`, `<w:i/>`) por §4.2.3.2. Activa por defecto; flag `enforceTypography: false`.
+  - **B3 · Unwrap prosa fragmentada (Don Quijote)** — `unwrapNarrativeParagraphs(doc)` fusiona párrafos `FHJPrrafo` contiguos sin puntuación fuerte al final cuando el siguiente empieza con minúscula/dígito/coma. Safety-rails: nunca dentro de tabla, con `numPr`, con drawings/picts, con `w:br type=page/column`; máximo 30 fusiones por bloque. **Preserva bookmarks, hyperlinks y comment-refs** al migrar runs (fix colateral de un bug silente).
+  - **B4 · Normalizar listas §4.2.4** — `enforceListIndent(doc)` fuerza `<w:ind>` canónico por `ilvl` (0: 0/357 | 1: 357/363 | 2: 720/720 twips). `normalizeListSymbols(outputZip)` reescribe `numbering.xml`: `lvlText` de bullets → `●` / `–` / `▪` por nivel, `numFmt` numerado → `decimal` / `lowerLetter` / `lowerRoman` (respetando `upperLetter`/`upperRoman`/`decimalZero`). Activa por defecto; flag `normalizeLists: false`.
+  - **B6 · Tipografía semántica §4.2.2** — `enforceSemanticTypography(doc)` detecta latinismos/extranjerismos ("in situ", "ad hoc", "et al.", "in vitro", "ex profeso", "motu proprio"…) y palabras-alerta ("ADVERTENCIA", "ATENCIÓN", "PRECAUCIÓN", "IMPORTANTE", "NOTA", "CUIDADO") en `<w:t>` y **splitea runs** en los bordes exactos, aplicando `<w:i/>` a los primeros y `<w:b/>` a los segundos (empate → negrita). Preserva `rPr` clonando por run. Activa por defecto; flag `semanticTypography: false`.
+  - **Stats enriquecidos**: `stats.normativa = { unwrap, spacing, typography, lists, semantic }` con `applied` + contadores por sub-pasada, alimentando la nueva checklist de UI.
+  - **UI · Checklist de cumplimiento normativo** — nuevo grupo de 5 checkboxes bajo "Cumplimiento normativo §4" con badge "Nuevo", y un panel de resultado `result-normativa` que renderiza los 5 chips con iconos `check` / `circle`.
+  - Tests: 15 nuevos en `tests/phase12.test.js` (151 total verdes — 2 skipped). Suite completa re-verde tras ajustes a `phase7`/`phase8`/`phase9`/`edge-cases`/`fixtures` y re-snapshot de `snapshot.test.js` por la nueva sub-clave `stats.normativa`.
 - **v0.10.0 · Engine v1.8 (Fase 10)** — Modo lote + auto-fix nivel 2 + validador reforzado:
   - **Modo lote**: nuevo toggle en la UI que permite seleccionar (o soltar) N documentos `.docx` contra el mismo referente de una sola vez. El resultado es un `.zip` que contiene todos los documentos formateados + un `_resumen_lote.csv` con estado, fixes y warnings por archivo. En lote los metadatos se autodetectan de cada documento (no se rellenan manualmente).
   - **Auto-fix nivel 2** — tres nuevas correcciones automáticas (opt-in, activas con `autoFix: true`):

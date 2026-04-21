@@ -1,5 +1,5 @@
 /**
- * Isoforma Engine v1.8
+ * Isoforma Engine v1.9
  * Motor de transformación de documentos PNT del Hospital de Jove.
  *
  * Comportamiento:
@@ -49,6 +49,87 @@
 
   const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
   const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+
+  // ============================================================
+  // Fase 12: Normativa FHJ canónica
+  // Fuente: 02_03_004_P_RECOMENDACIONES_ELABORA_DOCUMENTO_V_0_1
+  // Todas las reglas aquí declaradas mapean 1:1 a una sección del
+  // documento de recomendaciones y se aplican de forma enforcing
+  // (arrebatando valores heredados del contenido original).
+  //
+  // Unidades OOXML:
+  //   spacing before/after: twentieths-of-a-point (1pt = 20 ≡ auto)
+  //   spacing line:         240=1.0, 276=1.15, 360=1.5, 480=2.0
+  //   font size (sz):       half-points (10pt=20, 9pt=18, 8pt=16)
+  //   indent twips:         1cm ≈ 567 twips
+  // ============================================================
+  const FHJ_SPEC = Object.freeze({
+    // §4.3 Tabla 1 — Criterios de Espaciado e Interlineado
+    SPACING: {
+      FHJTtulo1:       { before: 240, after: 120, line: 360, lineRule: 'auto' }, // título principal 12/6 · 1,5
+      FHJTtuloprrafo:  { before: 120, after:  60, line: 360, lineRule: 'auto' }, // subtítulo 6/3 · 1,5
+      FHJPrrafo:       { before:   0, after: 120, line: 360, lineRule: 'auto' }, // párrafo 0/6 · 1,5
+      FHJVietaNivel1:  { before:   0, after:  60, line: 360, lineRule: 'auto' }, // viñeta/lista 0/3 · 1,5
+      FHJVietaNivel2:  { before:   0, after:  60, line: 360, lineRule: 'auto' },
+      FHJVietaNivel3:  { before:   0, after:  60, line: 360, lineRule: 'auto' },
+      FHJListaNivel1:  { before:   0, after:  60, line: 360, lineRule: 'auto' },
+      FHJListaNivel2:  { before:   0, after:  60, line: 360, lineRule: 'auto' },
+      FHJListaNivel3:  { before:   0, after:  60, line: 360, lineRule: 'auto' }
+    },
+    // §4.2.1 Tipografía: Arial 10 obligatoria para cuerpo
+    FONT_BODY: { name: 'Arial', szHalfPoints: 20 },
+    // §4.2.3.2 Fuente/notas bajo tabla: Arial 9 cursiva
+    FONT_TABLE_SOURCE: { name: 'Arial', szHalfPoints: 18 },
+    // §4.2.4.2 Viñetas por nivel
+    BULLETS: ['●', '–', '▪'],
+    // §4.2.4.1 Numeración por nivel
+    NUMBER_FORMATS: ['decimal', 'lowerLetter', 'lowerRoman'],
+    // §4.2.4.3 Tabulación exacta de listas (valores en twips)
+    // Nivel 1: pos 0, texto 0,63 → hanging 357
+    // Nivel 2: pos 0,63, texto 1,27 → left 357, hanging 363 (delta)
+    // Nivel 3: pos 1,27, texto 2,54 → left 720, hanging 720
+    LIST_INDENT: [
+      { left:    0, hanging: 357 },
+      { left:  357, hanging: 363 },
+      { left:  720, hanging: 720 }
+    ],
+    // §4.1 Secciones de un documento PNT
+    OBLIGATORY_SECTIONS: [
+      { code: 'OBJETO',                    keywords: ['OBJETO', 'OBJETIVO'],                                                            required: true  },
+      { code: 'CAMPO_APLICACION',          keywords: ['CAMPO DE APLICACIÓN', 'CAMPO DE APLICACION', 'ALCANCE', 'APLICACIÓN', 'APLICACION'], required: true  },
+      { code: 'DEFINICIONES',              keywords: ['DEFINICIONES'],                                                                 required: false },
+      { code: 'SIGLAS_ACRONIMOS',          keywords: ['SIGLAS', 'ACRÓNIMOS', 'ACRONIMOS', 'GLOSARIO'],                                 required: false },
+      { code: 'DESCRIPCION',               keywords: ['DESCRIPCIÓN', 'DESCRIPCION', 'DESARROLLO', 'PROCEDIMIENTO', 'SISTEMÁTICA', 'SISTEMATICA'], required: true },
+      { code: 'DOCUMENTACION_RELACIONADA', keywords: ['DOCUMENTACIÓN RELACIONADA', 'DOCUMENTACION RELACIONADA'],                       required: false },
+      { code: 'REFERENCIAS',               keywords: ['REFERENCIAS', 'BIBLIOGRAFÍA', 'BIBLIOGRAFIA'],                                  required: false },
+      { code: 'ANEXOS',                    keywords: ['ANEXO', 'RELACIÓN DE ANEXOS', 'RELACION DE ANEXOS'],                            required: false }
+    ],
+    // §4.2.2.1 Latín e italianismos → cursiva
+    LATIN_TERMS: [
+      'in situ', 'in vivo', 'in vitro', 'in extremis', 'ex vivo',
+      'ad hoc', 'ad libitum', 'ad interim', 'ad nauseam',
+      'et al.', 'et alii', 'et cetera',
+      'vs.', 'versus',
+      'post mortem', 'per se', 'per cápita', 'per capita',
+      'a priori', 'a posteriori',
+      'alma mater', 'curriculum vitae', 'modus operandi',
+      'sui generis', 'status quo', 'grosso modo',
+      'de facto', 'de iure', 'de jure'
+    ],
+    // §4.2.2.1 Extranjerismos médicos comunes → cursiva
+    FOREIGN_MEDICAL_TERMS: [
+      'stent', 'shock', 'bypass', 'pacemaker', 'screening',
+      'check-up', 'pool', 'clearance', 'output', 'input',
+      'flapping', 'rash', 'pool'
+    ],
+    // §4.2.2 Alertas de seguridad → negrita
+    ALERT_KEYWORDS: [
+      'ADVERTENCIA', 'ATENCIÓN', 'ATENCION', 'IMPORTANTE',
+      'PELIGRO', 'PRECAUCIÓN', 'PRECAUCION',
+      'NOTA DE SEGURIDAD', 'ALERTA', 'CRÍTICO', 'CRITICO',
+      'CONTRAINDICACIÓN', 'CONTRAINDICACION'
+    ]
+  });
 
   // ============================================================
   // Fase 3: error model
@@ -219,7 +300,11 @@
     return { warnings };
   }
 
-  async function process({ refFile, contentFile, metadata, onProgress, outputType, autoFix }) {
+  async function process({
+    refFile, contentFile, metadata, onProgress, outputType, autoFix,
+    // Fase 12 — cumplimiento normativo §4 (default on).
+    enforceSpacing, enforceTypography, unwrapNarrative, normalizeLists, semanticTypography
+  }) {
     const progress = onProgress || (() => {});
     metadata = metadata || {};
     // outputType: 'blob' (browser default) | 'nodebuffer' | 'uint8array' | 'arraybuffer'
@@ -228,13 +313,22 @@
     // para aplicar correcciones normativas antes del validador. La UI lo
     // activa por defecto mediante un checkbox.
     const doAutoFix = autoFix === true;
+    // Fase 12: flags de enforcement normativo. Default ON — sin ellos,
+    // contenidos externos (Don Quijote, textos pegados desde web) salen
+    // con formato roto aunque se clasifiquen bien.
+    const doEnforceSpacing   = enforceSpacing   !== false;
+    const doEnforceTypography = enforceTypography !== false;
+    const doUnwrapNarrative  = unwrapNarrative  !== false;
+    const doNormalizeLists   = normalizeLists   !== false;
+    const doSemanticTypography = semanticTypography !== false;
     const warnings = [];
     let fixes = {
       underline: 0, font: 0, allCaps: 0, emptyList: 0,
-      blankParas: 0, multiSpace: 0, renumbered: 0,
+      blankParas: 0, multiSpace: 0, renumbered: 0, crossRef: 0,
+      renumberedMap: {},
       samples: {
         underline: [], font: [], allCaps: [], emptyList: [],
-        blankParas: [], multiSpace: [], renumbered: []
+        blankParas: [], multiSpace: [], renumbered: [], crossRef: []
       }
     };
 
@@ -306,6 +400,66 @@
       });
     }
 
+    // Fase 12 · B3 — Unwrap de prosa fragmentada.
+    // Se ejecuta ANTES del enforcer de espaciado: el enforcer mira cada
+    // <w:p> y si fusionamos después, aplicaríamos spacing a fragmentos
+    // que ya no existen. Además, sin unwrap primero, Don Quijote da
+    // 15917 párrafos y la normativa visualmente es imposible.
+    let unwrapStats = { merged: 0, blocks: 0 };
+    if (doUnwrapNarrative) {
+      progress('Reconstruyendo prosa fragmentada');
+      unwrapStats = await runStep('Unwrap de prosa fragmentada', () =>
+        unwrapNarrativeParagraphs(docDoc)
+      );
+      if (unwrapStats.merged > 0) {
+        warnings.push({
+          code: 'NARRATIVE_UNWRAP_APPLIED',
+          message: 'Se han reunificado ' + unwrapStats.merged + ' fragmentos de prosa en ' + unwrapStats.blocks + ' párrafos continuos (el contenido traía saltos de línea duros en medio de oraciones).',
+          context: unwrapStats
+        });
+      }
+    }
+
+    // Fase 12 · B1 — Enforce espaciado e interlineado §4.3.
+    let spacingStats = { touched: 0, byStyle: {} };
+    if (doEnforceSpacing) {
+      progress('Aplicando espaciado normativo §4.3');
+      spacingStats = await runStep('Enforce espaciado FHJ', () =>
+        enforceFHJSpacing(docDoc)
+      );
+    }
+
+    // Fase 12 · B2 — Enforce Arial 10 en cuerpo (9 en fuente-de-tabla).
+    let typographyStats = { runs: 0, tableSource: 0 };
+    if (doEnforceTypography) {
+      progress('Aplicando tipografía Arial 10 §4.2.1');
+      typographyStats = await runStep('Enforce Arial 10/9', () =>
+        enforceArialTypography(docDoc)
+      );
+    }
+
+    // Fase 12 · B6 — Cursiva a latinismos/extranjerismos + negrita a alertas.
+    // Se ejecuta DESPUÉS de typography porque typography añade rPr a todos
+    // los runs: el splitter de semantic los clona con la rPr ya enriquecida.
+    let semanticStats = { italicTerms: 0, boldAlerts: 0, runsSplit: 0 };
+    if (doSemanticTypography) {
+      progress('Aplicando tipografía semántica §4.2.2');
+      semanticStats = await runStep('Tipografía semántica', () =>
+        enforceSemanticTypography(docDoc)
+      );
+    }
+
+    // Fase 12 · B4 — Tabulación de listas §4.2.4.3 a nivel de párrafo.
+    // (Los símbolos de viñeta §4.2.4.2 y el indent del numbering.xml se
+    // normalizan más tarde, tras el merge de numbering.)
+    let listIndentStats = { paragraphs: 0, byLevel: { 0: 0, 1: 0, 2: 0 } };
+    if (doNormalizeLists) {
+      progress('Aplicando tabulación de listas §4.2.4.3');
+      listIndentStats = await runStep('Enforce tabulación listas', () =>
+        enforceListIndent(docDoc)
+      );
+    }
+
     progress('Comprobando tabla de datos generales');
     await runStep('Inyectando tabla Datos generales', () => injectDatosGeneralesTableDom(docDoc));
 
@@ -326,6 +480,17 @@
       mergeNumberingIntoDoc(refZip, outputZip, docDoc)
     );
     warnings.push(...numMerge.warnings);
+
+    // Fase 12 · B4 — Normalizar símbolos de viñeta ●/–/▪ en numbering.xml.
+    // Se ejecuta DESPUÉS del merge para que las abstractNum transferidas
+    // del referente también pasen por el rewriter.
+    let listSymbolStats = { bulletsRewritten: 0, indentsRewritten: 0, numFmtsRewritten: 0 };
+    if (doNormalizeLists) {
+      progress('Normalizando símbolos de lista §4.2.4.2');
+      listSymbolStats = await runStep('Normalizar símbolos viñeta', () =>
+        normalizeListSymbols(outputZip)
+      );
+    }
 
     // Fase 5: validación estructural post-transformación (soft-fail).
     progress('Validando estructura del PNT');
@@ -384,7 +549,27 @@
         tables: numberingStats.tables,
         figures: numberingStats.figures,
         fixes: fixes,
-        autoFixApplied: doAutoFix
+        autoFixApplied: doAutoFix,
+        // Fase 12 — cumplimiento normativo §4
+        normativa: {
+          unwrap:     { applied: doUnwrapNarrative,  merged: unwrapStats.merged, blocks: unwrapStats.blocks },
+          spacing:    { applied: doEnforceSpacing,   touched: spacingStats.touched, byStyle: spacingStats.byStyle },
+          typography: { applied: doEnforceTypography, runs: typographyStats.runs, tableSource: typographyStats.tableSource },
+          lists:      {
+            applied: doNormalizeLists,
+            paragraphs: listIndentStats.paragraphs,
+            byLevel: listIndentStats.byLevel,
+            bulletsRewritten: listSymbolStats.bulletsRewritten,
+            indentsRewritten: listSymbolStats.indentsRewritten,
+            numFmtsRewritten: listSymbolStats.numFmtsRewritten
+          },
+          semantic:   {
+            applied: doSemanticTypography,
+            italicTerms: semanticStats.italicTerms,
+            boldAlerts:  semanticStats.boldAlerts,
+            runsSplit:   semanticStats.runsSplit
+          }
+        }
       },
       warnings
     };
@@ -1601,10 +1786,13 @@
   function applyNormativaFixesDom(doc) {
     const fixes = {
       underline: 0, font: 0, allCaps: 0, emptyList: 0,
-      blankParas: 0, multiSpace: 0, renumbered: 0,
+      blankParas: 0, multiSpace: 0, renumbered: 0, crossRef: 0,
+      // Fase 11: mapa old→new de renumeraciones aplicadas, para que el
+      // validador pueda detectar cross-refs obsoletas al terminar el pipeline.
+      renumberedMap: {},
       samples: {
         underline: [], font: [], allCaps: [], emptyList: [],
-        blankParas: [], multiSpace: [], renumbered: []
+        blankParas: [], multiSpace: [], renumbered: [], crossRef: []
       }
     };
     const MAX_SAMPLES = 3;
@@ -1801,6 +1989,7 @@
           }
           if (rewrote) {
             fixes.renumbered = (fixes.renumbered || 0) + 1;
+            fixes.renumberedMap[item.current] = desired;
             pushSample(fixes.samples.renumbered,
               `${item.current} → ${desired}: ${item.text.slice(0, 60)}`);
           }
@@ -1808,7 +1997,661 @@
       }
     }
 
+    // 8) Fase 11: cross-refs contextuales a títulos renumerados.
+    //    Si hemos renumerado "4 → 3", un texto como "ver punto 4.2" en el
+    //    cuerpo queda obsoleto. Reescribimos los patrones con prefijo claro
+    //    (apartado/punto/sección/epígrafe/ver/véase/según/en el/del). Los
+    //    matches ambiguos (bare "4.2" sin contexto) NO se tocan aquí — el
+    //    validador los listará como candidatos (NORMATIVA_CROSSREF_STALE).
+    const renumberMap = fixes.renumberedMap;
+    if (Object.keys(renumberMap).length > 0) {
+      const oldNums = Object.keys(renumberMap).sort((a, b) => b.length - a.length);
+      const oldAlt = oldNums.join('|');
+      // Grupos explícitos: 1=keyword, 2=whitespace, 3=oldN, 4=subpath.
+      const crossRefRe = new RegExp(
+        '(apartado|punto|secci[oó]n|ep[ií]grafe|ver|v[eé]ase|seg[uú]n|del|en(?:\\s+el)?)' +
+        '(\\s+)' +
+        '(' + oldAlt + ')' +
+        '((?:\\.\\d+)*)',
+        'gi'
+      );
+
+      const bodyTexts = body.getElementsByTagName('w:t');
+      for (let i = 0; i < bodyTexts.length; i++) {
+        const node = bodyTexts[i];
+        // No tocar runs dentro de párrafos de título (ya gestionados).
+        const parentP = findParentP(node);
+        if (parentP) {
+          const sid = getExistingPStyle(parentP);
+          if (isTitleStyle(sid)) continue;
+        }
+        const before = node.textContent || '';
+        if (!before) continue;
+        let localMatches = 0;
+        const after = before.replace(crossRefRe, (m, kw, ws, oldN, sub) => {
+          const newN = renumberMap[oldN];
+          if (newN == null) return m;
+          localMatches++;
+          return kw + ws + newN + (sub || '');
+        });
+        if (localMatches > 0 && after !== before) {
+          node.textContent = after;
+          fixes.crossRef += localMatches;
+          pushSample(fixes.samples.crossRef, before.trim());
+        }
+      }
+    }
+
     return fixes;
+  }
+
+  // ============================================================
+  // Fase 12 · Bloque B1: Enforcer de espaciado e interlineado.
+  // Arrebata los valores de <w:spacing> heredados del contenido
+  // original y los sustituye por los de FHJ_SPEC.SPACING[styleId].
+  //
+  // Por qué: el contenido del usuario (p.ej. Don Quijote pegado
+  // desde web) trae espaciado loco — 0 before/after, line=276 o
+  // sin line → en visual sale con saltos raros. La normativa §4.3
+  // exige valores exactos por estilo. Este enforcer es la única
+  // forma de garantizar que el resultado obedece la tabla del §4.3
+  // aunque el contenido importado venga con cualquier formato.
+  // ============================================================
+  /**
+   * Fuerza el <w:spacing> de cada párrafo del body según su FHJ pStyle.
+   * Párrafos sin estilo FHJ (p.ej. celdas de tabla con texto plano) se
+   * tratan como FHJPrrafo por defecto — es la única forma de evitar que
+   * el line=276 heredado de Calibri "Sin espaciado" contamine el resultado.
+   *
+   * Devuelve contadores por estilo para la UI de cumplimiento normativo.
+   */
+  function enforceFHJSpacing(doc) {
+    const stats = { touched: 0, byStyle: {} };
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return stats;
+
+    const paragraphs = Array.from(body.getElementsByTagName('w:p'));
+    for (const p of paragraphs) {
+      const styleId = getExistingPStyle(p) || 'FHJPrrafo';
+      const spec = FHJ_SPEC.SPACING[styleId] || FHJ_SPEC.SPACING.FHJPrrafo;
+      if (!spec) continue;
+
+      let pPr = firstChildByName(p, 'w:pPr');
+      if (!pPr) {
+        pPr = doc.createElementNS(W_NS, 'w:pPr');
+        p.insertBefore(pPr, p.firstChild);
+      }
+
+      // Borrar cualquier <w:spacing> heredado antes de reescribir.
+      // Evita que coexistan dos — OOXML solo toma el primero pero no
+      // queremos dejar basura en el XML serializado.
+      let sp = firstChildByName(pPr, 'w:spacing');
+      while (sp) {
+        pPr.removeChild(sp);
+        sp = firstChildByName(pPr, 'w:spacing');
+      }
+
+      sp = doc.createElementNS(W_NS, 'w:spacing');
+      sp.setAttribute('w:before', String(spec.before));
+      sp.setAttribute('w:after',  String(spec.after));
+      sp.setAttribute('w:line',   String(spec.line));
+      sp.setAttribute('w:lineRule', spec.lineRule || 'auto');
+      // Evita que Word "simplifique" y colapse before/after a contextualSpacing.
+      sp.setAttribute('w:beforeAutospacing', '0');
+      sp.setAttribute('w:afterAutospacing',  '0');
+
+      // Insertar después de <w:pStyle> si existe, si no al principio.
+      const pStyle = firstChildByName(pPr, 'w:pStyle');
+      if (pStyle && pStyle.nextSibling) {
+        pPr.insertBefore(sp, pStyle.nextSibling);
+      } else if (pStyle) {
+        pPr.appendChild(sp);
+      } else {
+        pPr.insertBefore(sp, pPr.firstChild);
+      }
+
+      stats.touched++;
+      stats.byStyle[styleId] = (stats.byStyle[styleId] || 0) + 1;
+    }
+    return stats;
+  }
+
+  // ============================================================
+  // Fase 12 · Bloque B2: Enforcer de tipografía Arial 10.
+  // §4.2.1 — Arial 10 obligatoria en todo el cuerpo.
+  // §4.2.3.2 — "Fuente: ..." bajo tabla → Arial 9 cursiva.
+  //
+  // El autoFix previo (applyNormativaFixesDom) ya cambiaba el
+  // nombre a Arial pero no tocaba el tamaño (sz). Con contenidos
+  // externos (Calibri 11 por defecto de Word) eso deja todo el
+  // doc a 11pt → viola §4.2.1. Este enforcer fuerza sz=20 en
+  // runs del body y sz=18 en los que están bajo tabla con prefijo
+  // "Fuente:" / "Fuentes:".
+  // ============================================================
+  /**
+   * Fuerza rFonts=Arial y sz correcto en todos los runs del body.
+   * Párrafos dentro de <w:tbl> con texto que empieza por "Fuente:"
+   * se consideran nota bibliográfica de tabla → Arial 9 cursiva.
+   */
+  function enforceArialTypography(doc) {
+    const stats = { runs: 0, tableSource: 0 };
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return stats;
+
+    // Detectar párrafos "Fuente: ..." bajo tabla antes de recorrer runs.
+    const tableSourceParas = new Set();
+    const tables = body.getElementsByTagName('w:tbl');
+    for (let i = 0; i < tables.length; i++) {
+      const tbl = tables[i];
+      const paras = tbl.getElementsByTagName('w:p');
+      for (let j = 0; j < paras.length; j++) {
+        const p = paras[j];
+        const txt = normalizeParagraphText(getParagraphTextDom(p));
+        if (/^fuentes?\s*:/i.test(txt)) tableSourceParas.add(p);
+      }
+    }
+    // Párrafos justo después de una tabla (fuera del <w:tbl>) con "Fuente:"
+    // también cuentan — Word suele poner la nota como párrafo hermano.
+    const bodyParas = Array.from(body.getElementsByTagName('w:p'));
+    for (const p of bodyParas) {
+      const txt = normalizeParagraphText(getParagraphTextDom(p));
+      if (!/^fuentes?\s*:/i.test(txt)) continue;
+      // Hermano inmediatamente previo es tabla?
+      let prev = p.previousSibling;
+      while (prev && prev.nodeType !== 1) prev = prev.previousSibling;
+      if (prev && (prev.nodeName === 'w:tbl' || prev.localName === 'tbl')) {
+        tableSourceParas.add(p);
+      }
+    }
+
+    const runs = Array.from(body.getElementsByTagName('w:r'));
+    for (const r of runs) {
+      // Saltar runs dentro de header/footer — estos se respetan.
+      // (getElementsByTagName en body ya excluye header/footer xmls separados).
+
+      // ¿Pertenece a párrafo marcado como fuente-de-tabla?
+      let owner = r.parentNode;
+      while (owner && owner.nodeType === 1 && owner.nodeName !== 'w:p' && owner.localName !== 'p') {
+        owner = owner.parentNode;
+      }
+      const isTableSource = owner && tableSourceParas.has(owner);
+
+      let rPr = firstChildByName(r, 'w:rPr');
+      if (!rPr) {
+        rPr = doc.createElementNS(W_NS, 'w:rPr');
+        r.insertBefore(rPr, r.firstChild);
+      }
+
+      // rFonts — reescribir a Arial
+      let rFonts = firstChildByName(rPr, 'w:rFonts');
+      if (!rFonts) {
+        rFonts = doc.createElementNS(W_NS, 'w:rFonts');
+        rPr.insertBefore(rFonts, rPr.firstChild);
+      }
+      rFonts.setAttribute('w:ascii', FHJ_SPEC.FONT_BODY.name);
+      rFonts.setAttribute('w:hAnsi', FHJ_SPEC.FONT_BODY.name);
+      rFonts.setAttribute('w:cs',    FHJ_SPEC.FONT_BODY.name);
+      rFonts.setAttribute('w:eastAsia', FHJ_SPEC.FONT_BODY.name);
+
+      // sz + szCs — forzar a 20 (10pt) o 18 (9pt si fuente-de-tabla)
+      const targetSz = isTableSource
+        ? FHJ_SPEC.FONT_TABLE_SOURCE.szHalfPoints
+        : FHJ_SPEC.FONT_BODY.szHalfPoints;
+
+      let sz = firstChildByName(rPr, 'w:sz');
+      if (!sz) {
+        sz = doc.createElementNS(W_NS, 'w:sz');
+        rPr.appendChild(sz);
+      }
+      sz.setAttribute('w:val', String(targetSz));
+
+      let szCs = firstChildByName(rPr, 'w:szCs');
+      if (!szCs) {
+        szCs = doc.createElementNS(W_NS, 'w:szCs');
+        rPr.appendChild(szCs);
+      }
+      szCs.setAttribute('w:val', String(targetSz));
+
+      // Fuente-de-tabla → añadir cursiva si no la tiene.
+      if (isTableSource) {
+        if (!firstChildByName(rPr, 'w:i')) {
+          rPr.appendChild(doc.createElementNS(W_NS, 'w:i'));
+        }
+        if (!firstChildByName(rPr, 'w:iCs')) {
+          rPr.appendChild(doc.createElementNS(W_NS, 'w:iCs'));
+        }
+        stats.tableSource++;
+      }
+
+      stats.runs++;
+    }
+    return stats;
+  }
+
+  // ============================================================
+  // Fase 12 · Bloque B3: Unwrap de prosa fragmentada.
+  // Caso de uso: Don Quijote pegado desde web → cada línea física
+  // es su propio <w:p> (15917 párrafos). Al aplicar FHJPrrafo con
+  // line=360 y after=120, cada mini-párrafo queda con saltos
+  // visuales enormes.
+  //
+  // Heurística: un <w:p> FHJPrrafo sin numPr, sin terminar en
+  // signo de puntuación fuerte (.!?:) y con el siguiente hermano
+  // también FHJPrrafo sin mayúscula inicial y que empieza por
+  // letra minúscula → es continuación de prosa → fusionar.
+  //
+  // Seguridad:
+  //   - Nunca fusiona dentro de tablas.
+  //   - Nunca fusiona párrafos con imágenes/dibujos.
+  //   - Nunca fusiona títulos o listas.
+  //   - Respeta un "hard break" explícito si hay <w:br/> con type=page.
+  //   - Máximo 30 fusiones por bloque (evita catástrofe en docs
+  //     intencionadamente fragmentados).
+  // ============================================================
+  /**
+   * Fusiona párrafos FHJPrrafo consecutivos que parecen fragmentos
+   * de una misma frase. Devuelve stats { merged, blocks }.
+   */
+  function unwrapNarrativeParagraphs(doc) {
+    const stats = { merged: 0, blocks: 0 };
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return stats;
+
+    // Predicados de elegibilidad.
+    function isMergeable(p) {
+      if (!p || p.nodeType !== 1) return false;
+      if (p.nodeName !== 'w:p' && p.localName !== 'p') return false;
+      const sid = getExistingPStyle(p);
+      if (sid && sid !== 'FHJPrrafo') return false; // solo párrafos-cuerpo
+      // Dentro de tabla → nunca fusionar.
+      if (isInsideName(p, 'w:tbl', false)) return false;
+      // Con <w:numPr> (lista) → nunca fusionar.
+      if (readNumPr(p)) return false;
+      // Con drawings/pict → nunca fusionar.
+      if (p.getElementsByTagName('w:drawing').length > 0) return false;
+      if (p.getElementsByTagName('w:pict').length > 0) return false;
+      // Con <w:br w:type="page"/> → hard break, no fusionar.
+      const brs = p.getElementsByTagName('w:br');
+      for (let i = 0; i < brs.length; i++) {
+        const t = brs[i].getAttributeNS(W_NS, 'type') || brs[i].getAttribute('w:type');
+        if (t === 'page' || t === 'column') return false;
+      }
+      return true;
+    }
+
+    function endsInStrongPunct(text) {
+      if (!text) return false;
+      // Fin de oración: . ! ? ; … : " » ) y comillas
+      return /[\.\!\?…;:»"”\)]\s*$/.test(text);
+    }
+
+    function startsWithContinuation(text) {
+      if (!text) return false;
+      const first = text.trim().charAt(0);
+      if (!first) return false;
+      // Continúa si empieza por minúscula, dígito, coma, "y"/"o", guion, etc.
+      // No continúa si empieza por mayúscula clara.
+      const low = first.toLowerCase();
+      if (low === first && first !== first.toUpperCase()) return true; // minúscula
+      // dígitos y símbolos de continuación
+      if (/[0-9\-\,\;\(\"\«]/.test(first)) return true;
+      return false;
+    }
+
+    // Localizar bloques contiguos fusionables.
+    const bodyChildren = Array.from(body.childNodes).filter(n => n.nodeType === 1);
+    let i = 0;
+    const MAX_MERGES_PER_BLOCK = 30;
+
+    while (i < bodyChildren.length) {
+      const p = bodyChildren[i];
+      if (!isMergeable(p)) { i++; continue; }
+      const text = normalizeParagraphText(getParagraphTextDom(p));
+      if (!text) { i++; continue; }
+      if (endsInStrongPunct(text)) { i++; continue; }
+
+      // Candidato → examinar siguientes hermanos fusionables.
+      let mergedInBlock = 0;
+      let current = p;
+      let currentText = text;
+
+      for (let j = i + 1; j < bodyChildren.length && mergedInBlock < MAX_MERGES_PER_BLOCK; j++) {
+        const next = bodyChildren[j];
+        if (!isMergeable(next)) break;
+        const nextText = normalizeParagraphText(getParagraphTextDom(next));
+        if (!nextText) break;
+        // Primer hermano debe empezar por continuación; los siguientes
+        // también hasta encontrar fin de oración.
+        if (!startsWithContinuation(nextText) && j === i + 1) break;
+        // Si current ya acaba en puntuación fuerte, cerramos bloque.
+        if (endsInStrongPunct(currentText)) break;
+
+        // Fusionar: mover todos los runs de `next` al final de `current`
+        // separados por un espacio (nuevo w:r con w:t=" ").
+        const spacerR = doc.createElementNS(W_NS, 'w:r');
+        const spacerT = doc.createElementNS(W_NS, 'w:t');
+        spacerT.setAttribute('xml:space', 'preserve');
+        spacerT.textContent = ' ';
+        spacerR.appendChild(spacerT);
+        current.appendChild(spacerR);
+
+        // Fase 12 B3.1: mover runs, hyperlinks Y bookmarks/commentRefs para
+        // no perder anclas intra-documento ni referencias cuando fusionamos.
+        const nextChildren = Array.from(next.childNodes).filter(n => {
+          if (n.nodeType !== 1) return false;
+          const ln = n.localName || n.nodeName.replace(/^w:/, '');
+          return ln === 'r' || ln === 'hyperlink' ||
+                 ln === 'bookmarkStart' || ln === 'bookmarkEnd' ||
+                 ln === 'commentRangeStart' || ln === 'commentRangeEnd' ||
+                 ln === 'commentReference';
+        });
+        for (const child of nextChildren) {
+          current.appendChild(child);
+        }
+        // Eliminar el párrafo fusionado.
+        if (next.parentNode) next.parentNode.removeChild(next);
+        bodyChildren[j] = null; // marcar como consumido
+        mergedInBlock++;
+        stats.merged++;
+        currentText = normalizeParagraphText(getParagraphTextDom(current));
+      }
+      if (mergedInBlock > 0) stats.blocks++;
+      // Compactar bodyChildren quitando nulls y continuar.
+      // Más simple: recalcular índice saltando los nulls.
+      let nextI = i + 1;
+      while (nextI < bodyChildren.length && bodyChildren[nextI] === null) nextI++;
+      i = nextI;
+    }
+    return stats;
+  }
+
+  // ============================================================
+  // Fase 12 · Bloque B4: Normalización de listas §4.2.4.
+  //
+  // §4.2.4.2  Símbolos de viñeta por nivel: ● (n1), – (n2), ▪ (n3).
+  // §4.2.4.1  Numeración por nivel: decimal, lowerLetter, lowerRoman.
+  // §4.2.4.3  Tabulación exacta (en twips):
+  //    Nivel 1 → posición 0,    texto 0,63cm (hanging 357)
+  //    Nivel 2 → posición 0,63, texto 1,27cm (hanging 363, left 357)
+  //    Nivel 3 → posición 1,27, texto 2,54cm (hanging 720, left 720)
+  //
+  // Enforce a dos niveles:
+  //   (a) cada párrafo con <w:numPr> recibe un <w:ind> calculado del ilvl
+  //   (b) word/numbering.xml se reescribe para que los <w:lvlText> de
+  //       abstractNums tipo bullet lleven los símbolos ●/–/▪ y los ilvls
+  //       tengan el <w:ind> canónico.
+  // ============================================================
+  /**
+   * Fuerza <w:ind> en cada párrafo de lista del body según su ilvl.
+   * Pisa el indent heredado del abstractNum o de hijos pPr anteriores.
+   */
+  function enforceListIndent(doc) {
+    const stats = { paragraphs: 0, byLevel: { 0: 0, 1: 0, 2: 0 } };
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return stats;
+
+    const paragraphs = Array.from(body.getElementsByTagName('w:p'));
+    for (const p of paragraphs) {
+      const numPrInfo = readNumPr(p);
+      if (!numPrInfo) continue;
+      const lvl = Math.max(0, Math.min(2, numPrInfo.ilvl));
+      const spec = FHJ_SPEC.LIST_INDENT[lvl];
+      if (!spec) continue;
+
+      let pPr = firstChildByName(p, 'w:pPr');
+      if (!pPr) {
+        pPr = doc.createElementNS(W_NS, 'w:pPr');
+        p.insertBefore(pPr, p.firstChild);
+      }
+
+      // Borrar <w:ind> heredados y reescribir.
+      let ind = firstChildByName(pPr, 'w:ind');
+      while (ind) {
+        pPr.removeChild(ind);
+        ind = firstChildByName(pPr, 'w:ind');
+      }
+      ind = doc.createElementNS(W_NS, 'w:ind');
+      ind.setAttribute('w:left',    String(spec.left));
+      ind.setAttribute('w:hanging', String(spec.hanging));
+      pPr.appendChild(ind);
+
+      stats.paragraphs++;
+      stats.byLevel[lvl]++;
+    }
+    return stats;
+  }
+
+  /**
+   * Reescribe word/numbering.xml para que:
+   *   - Los <w:lvl> bullet por nivel 0/1/2 usen ●, –, ▪ respectivamente.
+   *   - Los <w:lvl> numéricos mantengan su numFmt pero respeten la
+   *     secuencia decimal → lowerLetter → lowerRoman (sólo si el ref
+   *     no la define ya; no forzamos si es congruente).
+   *   - Cada <w:lvl> tenga <w:pPr><w:ind/></w:pPr> con los valores §4.2.4.3.
+   *
+   * Async porque necesita leer/escribir el zip. Tolera ausencia de numbering.xml.
+   */
+  async function normalizeListSymbols(outputZip) {
+    const stats = { bulletsRewritten: 0, indentsRewritten: 0, numFmtsRewritten: 0 };
+    const file = outputZip.file('word/numbering.xml');
+    if (!file) return stats;
+
+    const xml = await file.async('string');
+    let doc;
+    try { doc = new DOMParser().parseFromString(xml, 'application/xml'); }
+    catch (e) { return stats; }
+
+    const abstractNums = doc.getElementsByTagName('w:abstractNum');
+    for (let i = 0; i < abstractNums.length; i++) {
+      const aNum = abstractNums[i];
+      const lvls = aNum.getElementsByTagName('w:lvl');
+      for (let j = 0; j < lvls.length; j++) {
+        const lvl = lvls[j];
+        const ilvlStr = lvl.getAttributeNS(W_NS, 'ilvl') || lvl.getAttribute('w:ilvl') || '0';
+        const ilvl = Math.max(0, Math.min(2, Number(ilvlStr)));
+        const indentSpec = FHJ_SPEC.LIST_INDENT[ilvl];
+
+        const numFmt = firstChildByName(lvl, 'w:numFmt');
+        const fmt = numFmt ? (numFmt.getAttributeNS(W_NS, 'val') || numFmt.getAttribute('w:val') || 'bullet') : 'bullet';
+
+        if (fmt === 'bullet') {
+          // Reescribir w:lvlText con el símbolo §4.2.4.2.
+          let lvlText = firstChildByName(lvl, 'w:lvlText');
+          if (!lvlText) {
+            lvlText = doc.createElementNS(W_NS, 'w:lvlText');
+            // insertar tras numFmt si existe, si no al final
+            if (numFmt && numFmt.nextSibling) {
+              lvl.insertBefore(lvlText, numFmt.nextSibling);
+            } else {
+              lvl.appendChild(lvlText);
+            }
+          }
+          lvlText.setAttribute('w:val', FHJ_SPEC.BULLETS[ilvl]);
+          stats.bulletsRewritten++;
+        } else {
+          // Forzar numFmt canónico §4.2.4.1 por nivel (decimal/lowerLetter/lowerRoman)
+          // SOLO si no coincide con la secuencia — respetamos upperLetter/upperRoman
+          // si el referente los define explícitamente.
+          const canonical = FHJ_SPEC.NUMBER_FORMATS[ilvl];
+          if (numFmt && fmt !== canonical && !['upperLetter', 'upperRoman', 'decimalZero'].includes(fmt)) {
+            numFmt.setAttribute('w:val', canonical);
+            stats.numFmtsRewritten++;
+          }
+        }
+
+        // Reescribir <w:pPr><w:ind/></w:pPr> del nivel.
+        let pPr = firstChildByName(lvl, 'w:pPr');
+        if (!pPr) {
+          pPr = doc.createElementNS(W_NS, 'w:pPr');
+          lvl.appendChild(pPr);
+        }
+        let ind = firstChildByName(pPr, 'w:ind');
+        while (ind) {
+          pPr.removeChild(ind);
+          ind = firstChildByName(pPr, 'w:ind');
+        }
+        ind = doc.createElementNS(W_NS, 'w:ind');
+        ind.setAttribute('w:left',    String(indentSpec.left));
+        ind.setAttribute('w:hanging', String(indentSpec.hanging));
+        pPr.appendChild(ind);
+        stats.indentsRewritten++;
+      }
+    }
+
+    outputZip.file('word/numbering.xml', new XMLSerializer().serializeToString(doc));
+    return stats;
+  }
+
+  // ============================================================
+  // Fase 12 · Bloque B6: Tipografía semántica §4.2.2.
+  //
+  // Divide runs en partes para aplicar:
+  //   - cursiva a términos latinos (§4.2.2.1) y extranjerismos médicos.
+  //   - negrita a palabras-alerta (ADVERTENCIA, ATENCIÓN, ...) §4.2.2.
+  //
+  // La división respeta la rPr base del run original (fuente, tamaño,
+  // color...) añadiendo SOLO <w:i/> o <w:b/>. Para evitar doble-proceso
+  // en re-ejecuciones, un run ya marcado con italics/bold pasa tal cual.
+  // ============================================================
+  function enforceSemanticTypography(doc) {
+    const stats = { italicTerms: 0, boldAlerts: 0, runsSplit: 0 };
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return stats;
+
+    // Regexes precompiladas.
+    // Latín + extranjerismos → cursiva. Usamos (?<![a-záéíóúñ]) / (?![a-záéíóúñ])
+    // como pseudo-word-boundary que tolera puntuación española.
+    function escapeRegex(s) {
+      return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+    const italicAlt = FHJ_SPEC.LATIN_TERMS.concat(FHJ_SPEC.FOREIGN_MEDICAL_TERMS)
+      .map(escapeRegex).join('|');
+    const italicRe = new RegExp('(^|[^a-záéíóúñA-ZÁÉÍÓÚÑ])(' + italicAlt + ')(?![a-záéíóúñA-ZÁÉÍÓÚÑ])', 'gi');
+
+    const boldAlt = FHJ_SPEC.ALERT_KEYWORDS.map(escapeRegex).join('|');
+    // Alertas se consideran solo si aparecen como palabra independiente.
+    const boldRe = new RegExp('(^|[^A-ZÁÉÍÓÚÑa-záéíóúñ])(' + boldAlt + ')(?![A-ZÁÉÍÓÚÑa-záéíóúñ])', 'g');
+
+    /** Devuelve un <w:r> nuevo que clona rPr y añade la propiedad inline. */
+    function cloneRunWithToggle(origRun, textSegment, toggle /* 'i' | 'b' */) {
+      const newRun = doc.createElementNS(W_NS, 'w:r');
+      // Clonar rPr si existe.
+      const origRPr = firstChildByName(origRun, 'w:rPr');
+      let rPr;
+      if (origRPr) {
+        rPr = origRPr.cloneNode(true);
+      } else {
+        rPr = doc.createElementNS(W_NS, 'w:rPr');
+      }
+      // Añadir <w:i/> o <w:b/> si no está.
+      if (toggle === 'i') {
+        if (!firstChildByName(rPr, 'w:i')) rPr.appendChild(doc.createElementNS(W_NS, 'w:i'));
+        if (!firstChildByName(rPr, 'w:iCs')) rPr.appendChild(doc.createElementNS(W_NS, 'w:iCs'));
+      } else if (toggle === 'b') {
+        if (!firstChildByName(rPr, 'w:b')) rPr.appendChild(doc.createElementNS(W_NS, 'w:b'));
+        if (!firstChildByName(rPr, 'w:bCs')) rPr.appendChild(doc.createElementNS(W_NS, 'w:bCs'));
+      }
+      newRun.appendChild(rPr);
+      const t = doc.createElementNS(W_NS, 'w:t');
+      t.setAttribute('xml:space', 'preserve');
+      t.textContent = textSegment;
+      newRun.appendChild(t);
+      return newRun;
+    }
+
+    /** Crea un <w:r> plano (rPr clonada, sin toggles nuevos) con textSegment. */
+    function cloneRunPlain(origRun, textSegment) {
+      const newRun = doc.createElementNS(W_NS, 'w:r');
+      const origRPr = firstChildByName(origRun, 'w:rPr');
+      if (origRPr) newRun.appendChild(origRPr.cloneNode(true));
+      const t = doc.createElementNS(W_NS, 'w:t');
+      t.setAttribute('xml:space', 'preserve');
+      t.textContent = textSegment;
+      newRun.appendChild(t);
+      return newRun;
+    }
+
+    /** Escanea el string y devuelve un array de {text, toggle|null} segmentos. */
+    function splitByMatches(str) {
+      const markers = []; // [{start, end, toggle}]
+      // Italic matches
+      let m;
+      italicRe.lastIndex = 0;
+      while ((m = italicRe.exec(str)) !== null) {
+        const termStart = m.index + m[1].length;
+        const termEnd = termStart + m[2].length;
+        markers.push({ start: termStart, end: termEnd, toggle: 'i' });
+      }
+      // Bold matches
+      boldRe.lastIndex = 0;
+      while ((m = boldRe.exec(str)) !== null) {
+        const termStart = m.index + m[1].length;
+        const termEnd = termStart + m[2].length;
+        markers.push({ start: termStart, end: termEnd, toggle: 'b' });
+      }
+      if (markers.length === 0) return null;
+      // Ordenar y filtrar solapamientos (bold gana si colisiona con italic).
+      markers.sort((a, b) => a.start - b.start || (a.toggle === 'b' ? -1 : 1));
+      const merged = [];
+      for (const mk of markers) {
+        if (merged.length === 0) { merged.push(mk); continue; }
+        const last = merged[merged.length - 1];
+        if (mk.start >= last.end) merged.push(mk);
+        // solapamiento → descarta el posterior
+      }
+      const segments = [];
+      let cursor = 0;
+      for (const mk of merged) {
+        if (mk.start > cursor) segments.push({ text: str.slice(cursor, mk.start), toggle: null });
+        segments.push({ text: str.slice(mk.start, mk.end), toggle: mk.toggle });
+        cursor = mk.end;
+      }
+      if (cursor < str.length) segments.push({ text: str.slice(cursor), toggle: null });
+      return segments;
+    }
+
+    const runs = Array.from(body.getElementsByTagName('w:r'));
+    for (const r of runs) {
+      // Saltar runs que ya tienen italic/bold explícitos — probablemente
+      // el autor los quería así y no queremos duplicar o anidar propiedades.
+      const rPr = firstChildByName(r, 'w:rPr');
+      if (rPr) {
+        if (firstChildByName(rPr, 'w:i') || firstChildByName(rPr, 'w:b')) continue;
+      }
+      // Saltar runs dentro de tablas Datos generales, headers/footers — seguro.
+      if (isInsideName(r, 'w:tbl', false)) continue;
+
+      const ts = r.getElementsByTagName('w:t');
+      if (ts.length === 0) continue;
+      // Concatenar texto del run (normalmente es un solo <w:t>).
+      let full = '';
+      for (let i = 0; i < ts.length; i++) full += ts[i].textContent || '';
+      if (!full) continue;
+
+      const segments = splitByMatches(full);
+      if (!segments) continue;
+      // Al menos un segmento no-null significa hay algo que reemplazar.
+      const hasToggle = segments.some(s => s.toggle);
+      if (!hasToggle) continue;
+
+      // Reemplazar el run original por la secuencia de nuevos runs.
+      const parent = r.parentNode;
+      const newRuns = [];
+      for (const seg of segments) {
+        if (!seg.text) continue;
+        if (seg.toggle) {
+          newRuns.push(cloneRunWithToggle(r, seg.text, seg.toggle));
+          if (seg.toggle === 'i') stats.italicTerms++;
+          else if (seg.toggle === 'b') stats.boldAlerts++;
+        } else {
+          newRuns.push(cloneRunPlain(r, seg.text));
+        }
+      }
+      for (const nr of newRuns) parent.insertBefore(nr, r);
+      parent.removeChild(r);
+      stats.runsSplit++;
+    }
+    return stats;
   }
 
   // ============================================================

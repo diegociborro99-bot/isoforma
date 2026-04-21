@@ -205,6 +205,26 @@ section{position:relative;padding:120px 0;z-index:2}
 .options-row .toggle-title{font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;color:var(--ink)}
 .options-row .toggle-hint{font-family:'DM Sans',sans-serif;font-size:12.5px;color:var(--ink-mute);line-height:1.5}
 
+/* Options group — agrupa varios toggles relacionados bajo un título común */
+.options-group{margin-bottom:28px;padding:24px 28px 8px;background:var(--white);border:1px solid var(--line);border-left:3px solid var(--ink)}
+.options-group-title{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink);margin-bottom:6px;display:flex;align-items:center;gap:10px}
+.options-group-badge{font-family:'DM Sans',sans-serif;font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;padding:2px 7px;background:var(--accent);color:var(--white);font-weight:600}
+.options-group-hint{font-family:'DM Sans',sans-serif;font-size:12.5px;color:var(--ink-mute);line-height:1.55;margin-bottom:16px;max-width:90%}
+.options-group .options-row{border:none;border-top:1px solid var(--line-soft);border-left:none;padding:14px 0;margin-bottom:0;background:transparent}
+.options-group .options-row:first-of-type{border-top:none;padding-top:8px}
+
+/* Checklist de cumplimiento normativo en resultados */
+.result-normativa{border-top:1px solid var(--line-soft);padding:28px 56px}
+.result-normativa-title{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-mute);margin-bottom:16px}
+.normativa-checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.normativa-check{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;background:var(--bg);border-left:2px solid var(--accent)}
+.normativa-check.off{border-left-color:var(--ink-mute);opacity:.65}
+.normativa-check-icon{width:16px;height:16px;color:var(--accent);flex-shrink:0;margin-top:1px}
+.normativa-check.off .normativa-check-icon{color:var(--ink-mute)}
+.normativa-check-body{flex:1;min-width:0}
+.normativa-check-label{font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:500;color:var(--ink);line-height:1.4}
+.normativa-check-detail{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.05em;color:var(--ink-mute);margin-top:3px}
+
 /* Action */
 .action-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:40px}
 .privacy-note{display:flex;align-items:center;gap:12px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-mute)}
@@ -523,7 +543,7 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
     <div class="hero-content">
       <div class="hero-eyebrow">
         <span class="hero-eyebrow-dot"></span>
-        Fundación Hospital de Jove · v0.10 beta
+        Fundación Hospital de Jove · v0.11 beta
       </div>
       <h1>
         <span class="line"><span class="line-inner">Un documento,</span></span>
@@ -654,6 +674,56 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
       </label>
     </div>
 
+    <div class="options-group reveal">
+      <div class="options-group-title">Cumplimiento normativo §4 <span class="options-group-badge">Nuevo</span></div>
+      <div class="options-group-hint">Basado en el documento <em>Recomendaciones para la elaboración de documentos</em> del Hospital de Jove (V_0_1). Todo activado por defecto para máxima adherencia.</div>
+      <div class="options-row">
+        <label class="toggle">
+          <input type="checkbox" id="optUnwrapNarrative" checked>
+          <span class="toggle-text">
+            <span class="toggle-title">Reconstruir prosa fragmentada</span>
+            <span class="toggle-hint">Fusiona párrafos cortados a la mitad (típico de texto pegado desde web). Solo afecta párrafos-cuerpo sin puntuación fuerte al final.</span>
+          </span>
+        </label>
+      </div>
+      <div class="options-row">
+        <label class="toggle">
+          <input type="checkbox" id="optEnforceSpacing" checked>
+          <span class="toggle-text">
+            <span class="toggle-title">Forzar espaciado e interlineado §4.3</span>
+            <span class="toggle-hint">Arrebata el espaciado heredado del contenido original y aplica los valores canónicos por estilo (antes/después en pt · interlineado 1,5).</span>
+          </span>
+        </label>
+      </div>
+      <div class="options-row">
+        <label class="toggle">
+          <input type="checkbox" id="optEnforceTypography" checked>
+          <span class="toggle-text">
+            <span class="toggle-title">Forzar Arial 10 §4.2.1</span>
+            <span class="toggle-hint">Reescribe fuente y tamaño en todo el cuerpo (Arial 10pt). Las notas bajo tabla que empiezan por <em>Fuente:</em> van a Arial 9 cursiva §4.2.3.2.</span>
+          </span>
+        </label>
+      </div>
+      <div class="options-row">
+        <label class="toggle">
+          <input type="checkbox" id="optNormalizeLists" checked>
+          <span class="toggle-text">
+            <span class="toggle-title">Normalizar listas §4.2.4</span>
+            <span class="toggle-hint">Símbolos canónicos <strong>●</strong>/<strong>–</strong>/<strong>▪</strong> por nivel y tabulación exacta (0 → 0,63 → 1,27 → 2,54 cm) según §4.2.4.3.</span>
+          </span>
+        </label>
+      </div>
+      <div class="options-row">
+        <label class="toggle">
+          <input type="checkbox" id="optSemanticTypography" checked>
+          <span class="toggle-text">
+            <span class="toggle-title">Tipografía semántica §4.2.2</span>
+            <span class="toggle-hint">Latinismos e italianismos (<em>in situ</em>, <em>ad hoc</em>, <em>et al.</em>) en cursiva; palabras-alerta (<strong>ADVERTENCIA</strong>, <strong>ATENCIÓN</strong>) en negrita.</span>
+          </span>
+        </label>
+      </div>
+    </div>
+
     <div class="options-row reveal">
       <label class="toggle">
         <input type="checkbox" id="optBatch">
@@ -703,6 +773,10 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
         </button>
       </div>
       <div class="result-meta" id="resultMeta"></div>
+      <div class="result-normativa" id="resultNormativa" style="display:none">
+        <div class="result-normativa-title">Cumplimiento normativo §4</div>
+        <div class="normativa-checks" id="resultNormativaChecks"></div>
+      </div>
       <div class="result-fixes" id="resultFixes">
         <div class="result-fixes-title">Correcciones aplicadas automáticamente</div>
         <div class="result-fixes-chips" id="resultFixesChips"></div>
@@ -849,7 +923,7 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
       </div>
     </div>
     <div class="footer-bottom">
-      <span>Isoforma · v0.10</span>
+      <span>Isoforma · v0.11</span>
       <span>Fundación Hospital de Jove · 2026</span>
     </div>
     <div class="footer-signature">vibe coded with <span class="heart">&#9829;</span> by <em>Highkey Labs</em></div>
@@ -929,6 +1003,13 @@ const els = {
   metaTitle: document.getElementById('metaTitle'),
   optAutoFix: document.getElementById('optAutoFix'),
   optBatch: document.getElementById('optBatch'),
+  optUnwrapNarrative:    document.getElementById('optUnwrapNarrative'),
+  optEnforceSpacing:     document.getElementById('optEnforceSpacing'),
+  optEnforceTypography:  document.getElementById('optEnforceTypography'),
+  optNormalizeLists:     document.getElementById('optNormalizeLists'),
+  optSemanticTypography: document.getElementById('optSemanticTypography'),
+  resultNormativa:       document.getElementById('resultNormativa'),
+  resultNormativaChecks: document.getElementById('resultNormativaChecks'),
   btnProcess: document.getElementById('btnProcess'),
   btnDownload: document.getElementById('btnDownload'),
   btnReset: document.getElementById('btnReset'),
@@ -1319,9 +1400,91 @@ function formatBytes(bytes) {
   return (bytes/(1024*1024)).toFixed(2) + ' MB';
 }
 
+/** Lee los toggles de cumplimiento normativo §4 en un objeto para pasar al engine. */
+function readNormativaOpts() {
+  return {
+    unwrapNarrative:     !els.optUnwrapNarrative    || els.optUnwrapNarrative.checked,
+    enforceSpacing:      !els.optEnforceSpacing     || els.optEnforceSpacing.checked,
+    enforceTypography:   !els.optEnforceTypography  || els.optEnforceTypography.checked,
+    normalizeLists:      !els.optNormalizeLists     || els.optNormalizeLists.checked,
+    semanticTypography:  !els.optSemanticTypography || els.optSemanticTypography.checked
+  };
+}
+
+/** Renderiza el checklist "Cumplimiento normativo §4" con los stats del engine. */
+function renderNormativa(nrm) {
+  if (!els.resultNormativa || !els.resultNormativaChecks) return;
+  if (!nrm) { els.resultNormativa.style.display = 'none'; return; }
+  const checks = [
+    {
+      key: 'unwrap',
+      label: 'Prosa reconstruida §3',
+      detail: nrm.unwrap && nrm.unwrap.applied
+        ? (nrm.unwrap.merged > 0
+            ? nrm.unwrap.merged + ' fragmento' + (nrm.unwrap.merged === 1 ? '' : 's') + ' en ' + nrm.unwrap.blocks + ' bloque' + (nrm.unwrap.blocks === 1 ? '' : 's')
+            : 'nada que fusionar')
+        : 'desactivado',
+      on: !!(nrm.unwrap && nrm.unwrap.applied)
+    },
+    {
+      key: 'spacing',
+      label: 'Espaciado e interlineado §4.3',
+      detail: nrm.spacing && nrm.spacing.applied
+        ? nrm.spacing.touched + ' párrafo' + (nrm.spacing.touched === 1 ? '' : 's') + ' ajustado' + (nrm.spacing.touched === 1 ? '' : 's')
+        : 'desactivado',
+      on: !!(nrm.spacing && nrm.spacing.applied)
+    },
+    {
+      key: 'typography',
+      label: 'Tipografía Arial 10 §4.2.1',
+      detail: nrm.typography && nrm.typography.applied
+        ? nrm.typography.runs + ' run' + (nrm.typography.runs === 1 ? '' : 's') + ' (' + nrm.typography.tableSource + ' fuente-tabla)'
+        : 'desactivado',
+      on: !!(nrm.typography && nrm.typography.applied)
+    },
+    {
+      key: 'lists',
+      label: 'Listas ●/–/▪ §4.2.4',
+      detail: nrm.lists && nrm.lists.applied
+        ? nrm.lists.paragraphs + ' párrafo' + (nrm.lists.paragraphs === 1 ? '' : 's') + ' · ' +
+          nrm.lists.bulletsRewritten + ' bullets · ' + nrm.lists.indentsRewritten + ' indents'
+        : 'desactivado',
+      on: !!(nrm.lists && nrm.lists.applied)
+    },
+    {
+      key: 'semantic',
+      label: 'Cursiva/negrita semántica §4.2.2',
+      detail: nrm.semantic && nrm.semantic.applied
+        ? nrm.semantic.italicTerms + ' cursivas · ' + nrm.semantic.boldAlerts + ' negritas'
+        : 'desactivado',
+      on: !!(nrm.semantic && nrm.semantic.applied)
+    }
+  ];
+
+  els.resultNormativaChecks.innerHTML = '';
+  checks.forEach(c => {
+    const div = document.createElement('div');
+    div.className = 'normativa-check' + (c.on ? '' : ' off');
+    const icon = c.on
+      ? '<svg class="normativa-check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6 10-14"/></svg>'
+      : '<svg class="normativa-check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg>';
+    div.innerHTML =
+      icon +
+      '<div class="normativa-check-body">' +
+        '<div class="normativa-check-label"></div>' +
+        '<div class="normativa-check-detail"></div>' +
+      '</div>';
+    div.querySelector('.normativa-check-label').textContent = c.label;
+    div.querySelector('.normativa-check-detail').textContent = c.detail;
+    els.resultNormativaChecks.appendChild(div);
+  });
+  els.resultNormativa.style.display = '';
+}
+
 async function processSingle() {
   state.startTime = Date.now();
   const autoFix = !!(els.optAutoFix && els.optAutoFix.checked);
+  const normativaOpts = readNormativaOpts();
   const result = await IsoformaEngine.process({
     refFile: state.refFile,
     contentFile: state.contentFile,
@@ -1331,6 +1494,7 @@ async function processSingle() {
       title: els.metaTitle.value
     },
     autoFix,
+    ...normativaOpts,
     onProgress: (msg) => showStatus(msg, 'active')
   });
   state.outputBlob = result.blob;
@@ -1359,6 +1523,7 @@ async function processSingle() {
     trustNote;
 
   renderFixes(s);
+  renderNormativa(s.normativa);
   renderWarnings(state.warnings);
 
   const okMsg = state.warnings.length
@@ -1453,6 +1618,7 @@ function renderBatchTable(rows) {
 async function processBatch() {
   state.startTime = Date.now();
   const autoFix = !!(els.optAutoFix && els.optAutoFix.checked);
+  const normativaOpts = readNormativaOpts();
   const refBuffer = await state.refFile.arrayBuffer(); // se reutiliza
   const files = state.contentFiles.slice();
   const rows = [];
@@ -1467,6 +1633,7 @@ async function processBatch() {
         refFile: refBuffer,
         contentFile: f,
         autoFix,
+        ...normativaOpts,
         outputType: 'blob'
       });
       const blob = result.blob;

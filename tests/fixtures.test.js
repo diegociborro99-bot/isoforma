@@ -180,10 +180,14 @@ describe('Fase 7 — stress real: ref-gestion-info + content-pnt-claude', () => 
   });
 
   it('emite warnings normativos sobre el contenido stress', async () => {
+    // Fase 12 B2 enforceTypography (Arial 10) reescribe las fuentes antes de
+    // que el validador las vea. Lo desactivamos para verificar la detección
+    // original (este test ejercita el validador, no el enforcement).
     const { warnings } = await IsoformaEngine.process({
       refFile: readFixture(refName),
       contentFile: readFixture(contentName),
-      outputType: 'nodebuffer'
+      outputType: 'nodebuffer',
+      enforceTypography: false
     });
     const codes = warnings.map(w => w.code);
     // El stress doc tiene runs subrayados y fuentes no-Arial → ambos warnings esperados.
