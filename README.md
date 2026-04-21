@@ -89,11 +89,21 @@ Self-contained. Sin build step, sin dependencias locales. Librerías JSZip y Fil
 
 ## Versión
 
-MVP v0.5 · Engine v1.1 — abril 2026
+v0.7.0 · Engine v1.5 — abril 2026
 Fundación Hospital de Jove · Servicio de Laboratorio
 
 ## Changelog
 
+- **v0.7.0 · Engine v1.5 (Fase 7)** — Mejoras masivas de inteligencia:
+  - Clasificador feature-based con scoring multi-señal: el texto tipo `"1. Lavarse las manos"` ya no se mal-clasifica como Título 1 (antes 147/147 falsos positivos → ahora ~15 reales).
+  - Path de confianza: si el párrafo ya trae `pStyle` FHJ* se preserva; cuenta como `preservedStyles` en las estadísticas.
+  - Detección de listas via `numPr` → `numFmt` del `abstractNum`: bullets (`●/–/▪`) se mapean a `FHJVieta*`, numeradas (`1./a./i.`) a `FHJLista*`.
+  - Transferencia real de headers/footers del referente: los 6 XML + sus `_rels` + toda la media con prefijo `fhj_` para evitar colisiones.
+  - Detección estricta de cabecera FHJ propia (antes se quedaba con headers ajenos solo por tener una imagen): requiere marcadores textuales (`Hospital de Jove`, `FHJ`, código `P.XX.XX.XXX`).
+  - Normal / ListParagraph heredados → remapeados a FHJ equivalente.
+  - Validador normativo post-proceso: emite `NORMATIVA_ALL_CAPS_BODY`, `NORMATIVA_UNDERLINE`, `NORMATIVA_EMPTY_LIST`, `NORMATIVA_MISSING_DATOS_GENERALES`, `NORMATIVA_FONT_NON_ARIAL`.
+  - Tests: 94 verdes + 4 fixtures reales de stress incluidos.
+- **v0.6.0 · Engine v1.2 (Fase 6)** — IsoformaError tipificado (code, step, context, cause, toJSON), runStep wrapper, warnings estructurados, UMD-lite.
 - **v0.5 · Engine v1.1** — Lógica condicional: respeta la cabecera propia del documento cuando existe, inyecta la del referente cuando no. Metadatos opcionales. Detección robusta en los 3 headers posibles.
 - **v0.4 · Engine v1.0** — Motor completo: estilos FHJ, tabla Datos generales, numeración de tablas/figuras con highlight.
 - **v0.3** — Rediseño visual masivo: navbar fijo, cursor custom, orbes animados, secciones how/features/faq.
