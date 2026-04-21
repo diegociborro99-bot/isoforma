@@ -9,7 +9,11 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "build": "node scripts/build.js",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "start": "serve -s dist -l tcp://0.0.0.0:${PORT:-3000}"
+  },
+  "dependencies": {
+    "serve": "^14.2.3"
   },
   "devDependencies": {
     "@xmldom/xmldom": "^0.8.10",
