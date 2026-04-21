@@ -1,5 +1,5 @@
 /**
- * Isoforma Engine v1.5
+ * Isoforma Engine v1.6
  * Motor de transformación de documentos PNT del Hospital de Jove.
  *
  * Comportamiento:
@@ -219,12 +219,17 @@
     return { warnings };
   }
 
-  async function process({ refFile, contentFile, metadata, onProgress, outputType }) {
+  async function process({ refFile, contentFile, metadata, onProgress, outputType, autoFix }) {
     const progress = onProgress || (() => {});
     metadata = metadata || {};
     // outputType: 'blob' (browser default) | 'nodebuffer' | 'uint8array' | 'arraybuffer'
     const blobType = outputType || (isNode ? 'nodebuffer' : 'blob');
+    // autoFix: false por defecto (backward-compat). Pasar { autoFix: true }
+    // para aplicar correcciones normativas antes del validador. La UI lo
+    // activa por defecto mediante un checkbox.
+    const doAutoFix = autoFix === true;
     const warnings = [];
+    let fixes = { underline: 0, font: 0, allCaps: 0, emptyList: 0 };
 
     progress('Leyendo documentos');
     const refZip = await runStep('Leyendo referente', () => loadDocxZip(refFile, 'referente'));
@@ -322,6 +327,12 @@
     );
     for (const w of structuralWarnings) warnings.push(w);
 
+    // Fase 8: auto-fix normativo (antes del validador) si está habilitado.
+    if (doAutoFix) {
+      progress('Corrigiendo desviaciones normativas');
+      fixes = await runStep('Auto-fix normativo', () => applyNormativaFixesDom(docDoc));
+    }
+
     // Fase 7 (Bloque D): validador normativo PNT.
     progress('Validando normativa de formato');
     const normativaWarnings = await runStep('Validación normativa', () =>
@@ -364,7 +375,9 @@
         list: restyleStats.list || 0,
         preservedStyles: restyleStats.preserved || 0,
         tables: numberingStats.tables,
-        figures: numberingStats.figures
+        figures: numberingStats.figures,
+        fixes: fixes,
+        autoFixApplied: doAutoFix
       },
       warnings
     };
@@ -1559,6 +1572,111 @@
       }
     }
     return contentTypes;
+  }
+
+  // ============================================================
+  // Fase 8: auto-fix normativo — repara en DOM las infracciones
+  // que `validateNormativaDom` detecta. Opt-in via `autoFix: true`.
+  // ============================================================
+
+  /**
+   * Aplica correcciones deterministas sobre el DOM:
+   *   - underline: elimina <w:u> de runs del body.
+   *   - font: reescribe <w:rFonts> no-Arial a Arial (ascii/hAnsi/cs).
+   *   - allCaps: descapitaliza párrafos de cuerpo totalmente en mayúsculas
+   *     (primera letra en mayúscula, resto en minúsculas).
+   *   - emptyList: elimina párrafos de lista (FHJVieta o FHJLista, cualquier
+   *     nivel) sin texto y sin drawings/pict.
+   *
+   * No toca títulos (FHJTtulo*) ni headers/footers (opera sólo sobre w:body).
+   * Devuelve contadores por tipo de corrección.
+   */
+  function applyNormativaFixesDom(doc) {
+    const fixes = { underline: 0, font: 0, allCaps: 0, emptyList: 0 };
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return fixes;
+
+    const isTitleStyle = (styleId) => /^FHJTtulo/.test(styleId || '');
+    const bodyRuns = Array.from(body.getElementsByTagName('w:r'));
+
+    // 1) Underline: borrar <w:u> de los rPr del body.
+    for (const r of bodyRuns) {
+      const rPr = firstChildByName(r, 'w:rPr');
+      if (!rPr) continue;
+      const u = firstChildByName(rPr, 'w:u');
+      if (!u) continue;
+      const val = u.getAttributeNS(W_NS, 'val') || u.getAttribute('w:val') || 'single';
+      if (val === 'none') continue;
+      rPr.removeChild(u);
+      fixes.underline++;
+    }
+
+    // 2) Fuentes no-Arial: reescribir ascii/hAnsi/cs a Arial.
+    for (const r of bodyRuns) {
+      const rPr = firstChildByName(r, 'w:rPr');
+      if (!rPr) continue;
+      const rFonts = firstChildByName(rPr, 'w:rFonts');
+      if (!rFonts) continue;
+      let changed = false;
+      const attrs = ['ascii', 'hAnsi', 'cs'];
+      for (const attr of attrs) {
+        const cur = rFonts.getAttributeNS(W_NS, attr) || rFonts.getAttribute('w:' + attr);
+        if (cur && !/^Arial\b/i.test(cur)) {
+          rFonts.setAttributeNS(W_NS, 'w:' + attr, 'Arial');
+          changed = true;
+        }
+      }
+      if (changed) fixes.font++;
+    }
+
+    // 3) ALL-CAPS body: descapitalizar párrafos no-título en mayúsculas.
+    const paragraphs = Array.from(body.getElementsByTagName('w:p'));
+    for (const p of paragraphs) {
+      const styleId = getExistingPStyle(p);
+      if (isTitleStyle(styleId)) continue;
+      const text = normalizeParagraphText(getParagraphTextDom(p));
+      if (!text || text.length < 40) continue;
+      const letters = text.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]/g, '');
+      if (letters.length < 20) continue;
+      const upperLetters = text.replace(/[^A-ZÁÉÍÓÚÑ]/g, '').length;
+      const ratio = upperLetters / letters.length;
+      if (ratio < 0.9) continue;
+
+      const ts = p.getElementsByTagName('w:t');
+      let firstDone = false;
+      for (let i = 0; i < ts.length; i++) {
+        const original = ts[i].textContent || '';
+        if (!original) continue;
+        let lowered = original.toLowerCase();
+        if (!firstDone) {
+          // Capitaliza la primera letra encontrada (saltando whitespace inicial).
+          const m = lowered.match(/^(\s*)([A-Za-zÁÉÍÓÚÑáéíóúñ])/);
+          if (m) {
+            lowered = m[1] + m[2].toUpperCase() + lowered.slice(m[0].length);
+            firstDone = true;
+          }
+        }
+        ts[i].textContent = lowered;
+      }
+      fixes.allCaps++;
+    }
+
+    // 4) Listas vacías: eliminar párrafos FHJVieta*/FHJLista* sin texto ni dibujos.
+    for (const p of paragraphs) {
+      const styleId = getExistingPStyle(p);
+      if (!styleId) continue;
+      if (!/^FHJ(Vieta|Lista)/.test(styleId)) continue;
+      const text = normalizeParagraphText(getParagraphTextDom(p));
+      if (text) continue;
+      if (p.getElementsByTagName('w:drawing').length > 0) continue;
+      if (p.getElementsByTagName('w:pict').length > 0) continue;
+      if (p.parentNode) {
+        p.parentNode.removeChild(p);
+        fixes.emptyList++;
+      }
+    }
+
+    return fixes;
   }
 
   // ============================================================

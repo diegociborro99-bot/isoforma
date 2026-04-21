@@ -89,11 +89,21 @@ Self-contained. Sin build step, sin dependencias locales. Librerías JSZip y Fil
 
 ## Versión
 
-v0.7.0 · Engine v1.5 — abril 2026
+v0.8.0 · Engine v1.6 — abril 2026
 Fundación Hospital de Jove · Servicio de Laboratorio
 
 ## Changelog
 
+- **v0.8.0 · Engine v1.6 (Fase 8)** — Auto-fix normativo opt-in:
+  - Nueva opción `autoFix: true` en `process()` que repara en DOM las 4 infracciones normativas más comunes antes del validador:
+    - Subrayado en cuerpo → elimina `<w:u>`.
+    - Fuentes no-Arial → reescribe `rFonts` (ascii/hAnsi/cs) a Arial.
+    - ALL-CAPS en párrafos de cuerpo → descapitaliza (primera mayúscula, resto minúsculas); respeta títulos `FHJTtulo*`.
+    - Ítems de lista vacíos → elimina párrafos `FHJVieta*`/`FHJLista*` sin texto y sin imágenes.
+  - Contadores por tipo en `stats.fixes`; bandera `stats.autoFixApplied`.
+  - UI: checkbox "Corregir automáticamente antes de exportar" activado por defecto; la meta del resultado muestra cuántas correcciones se aplicaron.
+  - Backward compat: `autoFix: false` por defecto en el engine — los tests de Fase 7 siguen viendo warnings normativos como esperan.
+  - Tests: 11 nuevos en `tests/phase8.test.js` (109 total verdes).
 - **v0.7.0 · Engine v1.5 (Fase 7)** — Mejoras masivas de inteligencia:
   - Clasificador feature-based con scoring multi-señal: el texto tipo `"1. Lavarse las manos"` ya no se mal-clasifica como Título 1 (antes 147/147 falsos positivos → ahora ~15 reales).
   - Path de confianza: si el párrafo ya trae `pStyle` FHJ* se preserva; cuenta como `preservedStyles` en las estadísticas.

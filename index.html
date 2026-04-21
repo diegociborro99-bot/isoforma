@@ -195,6 +195,16 @@ section{position:relative;padding:120px 0;z-index:2}
 .field.autofilled label::after{content:' · AUTO-DETECTADO';color:var(--accent);letter-spacing:.2em}
 .field.autofilled input:focus{background:transparent}
 
+/* Options row (autofix toggle) */
+.options-row{display:flex;align-items:flex-start;gap:14px;padding:20px 28px;margin-bottom:20px;background:var(--white);border:1px solid var(--line);border-left:3px solid var(--accent)}
+.options-row label.toggle{display:flex;align-items:flex-start;gap:12px;cursor:pointer;flex:1}
+.options-row input[type="checkbox"]{appearance:none;-webkit-appearance:none;width:18px;height:18px;border:1.5px solid var(--ink-mute);background:transparent;cursor:pointer;flex-shrink:0;margin-top:2px;position:relative;transition:all .2s}
+.options-row input[type="checkbox"]:checked{background:var(--accent);border-color:var(--accent)}
+.options-row input[type="checkbox"]:checked::after{content:'';position:absolute;left:4px;top:0;width:5px;height:10px;border:solid var(--white);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.options-row .toggle-text{display:flex;flex-direction:column;gap:4px}
+.options-row .toggle-title{font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;color:var(--ink)}
+.options-row .toggle-hint{font-family:'DM Sans',sans-serif;font-size:12.5px;color:var(--ink-mute);line-height:1.5}
+
 /* Action */
 .action-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:40px}
 .privacy-note{display:flex;align-items:center;gap:12px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-mute)}
@@ -366,7 +376,7 @@ input[type=file]{display:none}
     <div class="hero-content">
       <div class="hero-eyebrow">
         <span class="hero-eyebrow-dot"></span>
-        Fundación Hospital de Jove · v0.7 beta
+        Fundación Hospital de Jove · v0.8 beta
       </div>
       <h1>
         <span class="line"><span class="line-inner">Un documento,</span></span>
@@ -485,6 +495,16 @@ input[type=file]{display:none}
         <label>Título del documento · opcional</label>
         <input type="text" id="metaTitle" placeholder="Solo si el documento no trae cabecera propia">
       </div>
+    </div>
+
+    <div class="options-row reveal">
+      <label class="toggle">
+        <input type="checkbox" id="optAutoFix" checked>
+        <span class="toggle-text">
+          <span class="toggle-title">Corregir automáticamente antes de exportar</span>
+          <span class="toggle-hint">Elimina subrayados del cuerpo, reescribe fuentes no-Arial a Arial, descapitaliza párrafos en MAYÚSCULAS y borra ítems de lista vacíos. No toca títulos ni imágenes.</span>
+        </span>
+      </label>
     </div>
 
     <div class="action-row reveal">
@@ -628,7 +648,7 @@ input[type=file]{display:none}
       </div>
     </div>
     <div class="footer-bottom">
-      <span>Isoforma · v0.7</span>
+      <span>Isoforma · v0.8</span>
       <span>Fundación Hospital de Jove · 2026</span>
     </div>
     <div class="footer-signature">vibe coded with <span class="heart">&#9829;</span> by <em>Highkey Labs</em></div>
@@ -695,6 +715,7 @@ const els = {
   metaCode: document.getElementById('metaCode'),
   metaVersion: document.getElementById('metaVersion'),
   metaTitle: document.getElementById('metaTitle'),
+  optAutoFix: document.getElementById('optAutoFix'),
   btnProcess: document.getElementById('btnProcess'),
   btnDownload: document.getElementById('btnDownload'),
   btnReset: document.getElementById('btnReset'),
@@ -913,6 +934,7 @@ els.btnProcess.addEventListener('click', async () => {
   els.btnProcess.disabled = true;
   state.startTime = Date.now();
   try {
+    const autoFix = !!(els.optAutoFix && els.optAutoFix.checked);
     const result = await IsoformaEngine.process({
       refFile: state.refFile,
       contentFile: state.contentFile,
@@ -921,6 +943,7 @@ els.btnProcess.addEventListener('click', async () => {
         version: els.metaVersion.value,
         title: els.metaTitle.value
       },
+      autoFix,
       onProgress: (msg) => showStatus(msg, 'active')
     });
     state.outputBlob = result.blob;
@@ -943,10 +966,25 @@ els.btnProcess.addEventListener('click', async () => {
     const listNote = (typeof s.list === 'number' && s.list > 0)
       ? ` · ${s.list} listas numeradas`
       : '';
+    let fixesNote = '';
+    if (s.autoFixApplied && s.fixes) {
+      const f = s.fixes;
+      const totalFixes = (f.underline || 0) + (f.font || 0) + (f.allCaps || 0) + (f.emptyList || 0);
+      if (totalFixes > 0) {
+        const parts = [];
+        if (f.underline) parts.push(`${f.underline} subrayados`);
+        if (f.font) parts.push(`${f.font} fuentes no-Arial`);
+        if (f.allCaps) parts.push(`${f.allCaps} párrafos en mayúsculas`);
+        if (f.emptyList) parts.push(`${f.emptyList} ítems de lista vacíos`);
+        fixesNote = ` · auto-fix aplicado: ${parts.join(', ')}`;
+      } else {
+        fixesNote = ' · auto-fix: nada que corregir';
+      }
+    }
     els.resultMeta.textContent =
       `${headerNote} · ${s.title1} títulos · ${s.titPar} subtítulos · ${s.paragraph} párrafos · ` +
       `${s.vignette} viñetas${listNote} · ${s.tables} tablas · ${s.figures} figuras` +
-      trustNote;
+      trustNote + fixesNote;
 
     renderWarnings(state.warnings);
 

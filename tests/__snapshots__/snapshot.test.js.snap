@@ -28,7 +28,14 @@ exports[`snapshot — document.xml post-procesado > produce una huella determini
     ],
   },
   "stats": {
+    "autoFixApplied": false,
     "figures": 1,
+    "fixes": {
+      "allCaps": 0,
+      "emptyList": 0,
+      "font": 0,
+      "underline": 0,
+    },
     "list": 2,
     "paragraph": 5,
     "preservedHeaders": false,
