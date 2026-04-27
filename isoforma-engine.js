@@ -347,6 +347,9 @@
     const styleMerge = await runStep('Fusionando estilos del referente', () => mergeStylesAndTransferCore(refZip, outputZip));
     warnings.push(...styleMerge.warnings);
 
+    // Fase 14: extract page layout from reference to match template exactly
+    const refLayout = await runStep('Extrayendo layout del referente', () => extractRefPageLayout(refZip));
+
     let relIds = null;
 
     if (alreadyHasFhjHeader) {
@@ -468,7 +471,7 @@
 
     if (relIds) {
       progress('Configurando página y secciones');
-      await runStep('Actualizando sectPr', () => updateSectPrDom(docDoc, relIds));
+      await runStep('Actualizando sectPr', () => updateSectPrDom(docDoc, relIds, refLayout));
     }
 
     await runStep('Renumerando bookmarks', () => renumberBookmarksDom(docDoc));
@@ -1174,6 +1177,10 @@
     'table-caption':         'Encabezado de tabla ("Tabla N", "Cuadro N").',
     'definition-term':       'Término de definición seguido de dos puntos y definición.',
     'procedure-step':        'Paso de procedimiento numerado (ej. "1. Lavar…", texto largo).',
+    // Fase 14: contextual corrections
+    'bold-heading-upgrade':          'Texto corto en negrita en el documento original → probable título (formato-aware).',
+    'bibliography-context-demote':   'Dentro de sección Bibliografía/Referencias → reclasificado como párrafo.',
+    'numbered-sequence-coherence':   'Párrafos adyacentes numerados son títulos → coherencia de secuencia numérica.',
   };
 
   // Human-readable style names for the justification UI.
@@ -1293,6 +1300,42 @@
 
       setParagraphStyleDom(doc, p, style);
     }
+
+    // Fase 14: Second-pass contextual intelligence
+    // Re-analyze classifications using surrounding context + formatting signals
+    if (trackJustification && justification.length > 0) {
+      const corrections = contextualCorrections(paragraphs, justification, doc);
+      if (corrections > 0) {
+        // Re-apply corrected styles to the DOM
+        let jIdx = 0;
+        for (const p of paragraphs) {
+          const existingStyle = getExistingPStyle(p);
+          // Skip paragraphs that were preserved-fhj or no-text-anchor (they're in justification too)
+          if (jIdx >= justification.length) break;
+          const j = justification[jIdx];
+          // Find corresponding paragraph by checking if text matches
+          const rawText = getParagraphTextDom(p);
+          const text = normalizeParagraphText(rawText);
+          if ((text || '').slice(0, 120) === j.text || (!text && !j.text)) {
+            // If style was corrected, update DOM
+            if (j.reason === 'bold-heading-upgrade' || j.reason === 'bibliography-context-demote' || j.reason === 'numbered-sequence-coherence') {
+              setParagraphStyleDom(doc, p, j.style);
+            }
+            jIdx++;
+          }
+        }
+        // Recount stats after corrections
+        title1 = 0; titPar = 0; paragraph = 0; vignette = 0; list = 0;
+        for (const j of justification) {
+          if (j.style === 'FHJTtulo1') title1++;
+          else if (j.style === 'FHJTtuloprrafo') titPar++;
+          else if (j.style === 'FHJPrrafo') paragraph++;
+          else if (/^FHJVieta/.test(j.style)) { vignette++; list++; }
+          else if (/^FHJLista/.test(j.style)) { list++; }
+        }
+      }
+    }
+
     return { title1, titPar, paragraph, vignette, list, preserved, lowConfidence, justification };
   }
 
@@ -1592,6 +1635,188 @@
     return /^[\-\u2022\u00B7\*\u25E6\u25AA\u25AB\u25A0\u25A1\u25C6]\s+/.test(text);
   }
 
+  // ============================================================
+  // Fase 14: Contextual intelligence — second-pass corrections
+  // Analyzes the paragraph sequence to fix misclassifications
+  // that single-paragraph analysis can't catch.
+  // ============================================================
+
+  /**
+   * Reads formatting signals from the original Word paragraph:
+   * bold, font size, alignment, color. These help disambiguate
+   * between title and paragraph when text alone isn't enough.
+   */
+  function readParagraphFormattingSignals(p) {
+    const signals = { bold: false, fontSize: 0, centered: false, colored: false, italic: false };
+
+    // Check pPr for alignment
+    const pPr = firstChildByName(p, 'w:pPr');
+    if (pPr) {
+      const jc = firstChildByName(pPr, 'w:jc');
+      if (jc) {
+        const val = jc.getAttributeNS(W_NS, 'val') || jc.getAttribute('w:val') || '';
+        signals.centered = val === 'center';
+      }
+      // Check pPr-level rPr (paragraph-level run properties)
+      const pRPr = firstChildByName(pPr, 'w:rPr');
+      if (pRPr) {
+        if (firstChildByName(pRPr, 'w:b')) signals.bold = true;
+        if (firstChildByName(pRPr, 'w:i')) signals.italic = true;
+        const sz = firstChildByName(pRPr, 'w:sz');
+        if (sz) {
+          const val = parseInt(sz.getAttributeNS(W_NS, 'val') || sz.getAttribute('w:val') || '0', 10);
+          if (val > 0) signals.fontSize = val;
+        }
+      }
+    }
+
+    // Check first run for bold/size
+    const runs = p.getElementsByTagName('w:r');
+    if (runs.length > 0) {
+      const rPr = firstChildByName(runs[0], 'w:rPr');
+      if (rPr) {
+        if (firstChildByName(rPr, 'w:b')) signals.bold = true;
+        if (firstChildByName(rPr, 'w:i')) signals.italic = true;
+        const sz = firstChildByName(rPr, 'w:sz');
+        if (sz) {
+          const val = parseInt(sz.getAttributeNS(W_NS, 'val') || sz.getAttribute('w:val') || '0', 10);
+          if (val > 0 && !signals.fontSize) signals.fontSize = val;
+        }
+        const color = firstChildByName(rPr, 'w:color');
+        if (color) {
+          const val = color.getAttributeNS(W_NS, 'val') || color.getAttribute('w:val') || '';
+          if (val && val !== '000000' && val !== 'auto') signals.colored = true;
+        }
+      }
+    }
+
+    return signals;
+  }
+
+  /**
+   * Fase 14: Second-pass contextual corrections on the classified paragraphs.
+   * Fixes common misclassification patterns using surrounding context:
+   *
+   * 1) "Orphan subtitle" — a single FHJTtuloprrafo not preceded by any
+   *    FHJTtulo1 is likely a false positive (numbered paragraph, not a subtitle).
+   *
+   * 2) "Bold heading upgrade" — paragraphs classified as FHJPrrafo (default)
+   *    that are entirely bold + short → likely titles that the regex missed.
+   *
+   * 3) "Bibliography section" — once we detect a REFERENCIAS/BIBLIOGRAFÍA
+   *    title, all following paragraphs until next title should be paragraphs
+   *    (not medium-confidence titles).
+   *
+   * 4) "Numbered sequence coherence" — if we see 1., 2., 3. as titles but
+   *    4. was classified as paragraph, upgrade 4. to match.
+   *
+   * Returns the number of corrections made.
+   */
+  function contextualCorrections(paragraphs, classifications, doc) {
+    let corrections = 0;
+    if (!classifications || classifications.length === 0) return corrections;
+
+    // Build a parallel array of text + signals
+    const entries = classifications.map((c, i) => ({
+      ...c,
+      idx: i,
+      signals: (paragraphs[i] ? readParagraphFormattingSignals(paragraphs[i]) : null)
+    }));
+
+    // --- Pass 1: Bold short text classified as default paragraph → upgrade to title ---
+    for (const e of entries) {
+      if (e.reason !== 'default' || !e.signals) continue;
+      const text = e.text || '';
+      if (text.length < 4 || text.length > 80) continue;
+      // If the original Word formatting was bold + larger font, it's likely a title
+      if (e.signals.bold && !e.signals.italic) {
+        // Check if font is larger than body (20 half-pts = 10pt)
+        if (e.signals.fontSize > 20 || (e.signals.fontSize === 0 && text.length <= 50)) {
+          e.style = 'FHJTtulo1';
+          e.confidence = 'medium';
+          e.reason = 'bold-heading-upgrade';
+          e.explanation = 'Texto corto en negrita en el documento original → probable título (detectado por formato, no por texto).';
+          corrections++;
+        }
+      }
+    }
+
+    // --- Pass 2: Bibliography section — after REFERENCIAS/BIBLIOGRAFÍA, demote medium-confidence titles ---
+    let inBibliography = false;
+    for (const e of entries) {
+      if (/^FHJTtulo1$/.test(e.style)) {
+        const upper = (e.text || '').toUpperCase();
+        if (/REFERENCIA|BIBLIOGRAF/.test(upper)) {
+          inBibliography = true;
+          continue;
+        }
+        // Any other Título1 exits the bibliography section
+        if (inBibliography && e.confidence === 'high') {
+          inBibliography = false;
+        }
+      }
+      if (inBibliography && e.style === 'FHJTtulo1' && e.confidence === 'medium') {
+        e.style = 'FHJPrrafo';
+        e.confidence = 'high';
+        e.reason = 'bibliography-context-demote';
+        e.explanation = 'Dentro de la sección de Referencias/Bibliografía → reclasificado como párrafo (era falso positivo de título).';
+        corrections++;
+      }
+    }
+
+    // --- Pass 3: Numbered sequence coherence ---
+    // Find sequences of "N.- TITLE" where most are Título1 but some were missed.
+    // IMPORTANT: only promote if the candidate LOOKS like a title:
+    //   - uses the same prefix pattern (N.- or N.)
+    //   - text after the number is short AND uppercase-heavy (ratio ≥ 0.5)
+    //   - was classified as 'default' (not 'procedure-step' which was explicitly demoted)
+    const numberedTitles = entries.filter(e => e.style === 'FHJTtulo1' && /^numbered-level-1$/.test(e.reason));
+    if (numberedTitles.length >= 2) {
+      const titleNumbers = new Set(numberedTitles.map(e => {
+        const m = (e.text || '').match(/^(\d+)/);
+        return m ? parseInt(m[1], 10) : 0;
+      }).filter(n => n > 0));
+
+      for (const e of entries) {
+        if (e.style !== 'FHJPrrafo') continue;
+        // Never override explicit procedure-step classification
+        if (e.reason === 'procedure-step') continue;
+        if (e.reason !== 'default') continue;
+        const m = (e.text || '').match(/^(\d+)[\.\-\)\s]+([A-ZÁÉÍÓÚÑ].*)$/);
+        if (!m) continue;
+        const num = parseInt(m[1], 10);
+        const rest = m[2];
+        // Must be short AND uppercase-heavy
+        if ((e.text || '').length > 80) continue;
+        const letters = rest.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]/g, '');
+        const upperLetters = rest.replace(/[^A-ZÁÉÍÓÚÑ]/g, '').length;
+        const ratio = letters.length ? upperLetters / letters.length : 0;
+        if (ratio < 0.5) continue;
+        // If the adjacent numbers are titles, this gap number should also be a title
+        if (titleNumbers.has(num - 1) || titleNumbers.has(num + 1)) {
+          e.style = 'FHJTtulo1';
+          e.confidence = 'medium';
+          e.reason = 'numbered-sequence-coherence';
+          e.explanation = 'Los párrafos adyacentes numerados (' + (num - 1) + './' + (num + 1) + '.) son títulos → este también lo es (coherencia de secuencia).';
+          corrections++;
+          titleNumbers.add(num);
+        }
+      }
+    }
+
+    // Write corrections back
+    if (corrections > 0) {
+      for (let i = 0; i < entries.length; i++) {
+        classifications[i].style = entries[i].style;
+        classifications[i].confidence = entries[i].confidence;
+        classifications[i].reason = entries[i].reason;
+        classifications[i].explanation = entries[i].explanation;
+      }
+    }
+
+    return corrections;
+  }
+
   // Fase 6: etiquetas canónicas que esperamos en la primera columna de la
   // tabla de Datos generales FHJ. Si una tabla tiene ≥ 3 de estas etiquetas
   // en su primera columna, la reconocemos como "Datos generales" aunque no
@@ -1778,7 +2003,74 @@
     return imported[0];
   }
 
-  function updateSectPrDom(doc, ids) {
+  /**
+   * Fase 14: Extract page layout (margins, size, grid) from the reference
+   * document so the output matches the template exactly. Falls back to
+   * FHJ canonical values if the reference doesn't have a sectPr.
+   */
+  async function extractRefPageLayout(refZip) {
+    const defaults = {
+      pgSz: { w: '11906', h: '16838', code: '9' },
+      pgMar: { top: '1418', right: '1418', bottom: '1418', left: '1701', header: '709', footer: '709', gutter: '0' },
+      cols: { space: '708' },
+      docGrid: { linePitch: '360' }
+    };
+
+    const docFile = refZip.file('word/document.xml');
+    if (!docFile) return defaults;
+    const xml = await docFile.async('string');
+    let doc;
+    try { doc = new DOMParser().parseFromString(xml, 'application/xml'); } catch (e) { return defaults; }
+
+    const sectPrs = doc.getElementsByTagName('w:sectPr');
+    if (sectPrs.length === 0) return defaults;
+    const sectPr = sectPrs[sectPrs.length - 1]; // last sectPr is the document-level one
+
+    // Extract pgSz
+    const pgSzEl = firstChildByName(sectPr, 'w:pgSz');
+    if (pgSzEl) {
+      const w = pgSzEl.getAttributeNS(W_NS, 'w') || pgSzEl.getAttribute('w:w');
+      const h = pgSzEl.getAttributeNS(W_NS, 'h') || pgSzEl.getAttribute('w:h');
+      const code = pgSzEl.getAttributeNS(W_NS, 'code') || pgSzEl.getAttribute('w:code');
+      if (w) defaults.pgSz.w = w;
+      if (h) defaults.pgSz.h = h;
+      if (code) defaults.pgSz.code = code;
+    }
+
+    // Extract pgMar
+    const pgMarEl = firstChildByName(sectPr, 'w:pgMar');
+    if (pgMarEl) {
+      for (const attr of ['top', 'right', 'bottom', 'left', 'header', 'footer', 'gutter']) {
+        const val = pgMarEl.getAttributeNS(W_NS, attr) || pgMarEl.getAttribute('w:' + attr);
+        if (val) defaults.pgMar[attr] = val;
+      }
+    }
+
+    // Extract cols
+    const colsEl = firstChildByName(sectPr, 'w:cols');
+    if (colsEl) {
+      const space = colsEl.getAttributeNS(W_NS, 'space') || colsEl.getAttribute('w:space');
+      if (space) defaults.cols.space = space;
+    }
+
+    // Extract docGrid
+    const docGridEl = firstChildByName(sectPr, 'w:docGrid');
+    if (docGridEl) {
+      const lp = docGridEl.getAttributeNS(W_NS, 'linePitch') || docGridEl.getAttribute('w:linePitch');
+      if (lp) defaults.docGrid.linePitch = lp;
+    }
+
+    return defaults;
+  }
+
+  function updateSectPrDom(doc, ids, layout) {
+    layout = layout || {
+      pgSz: { w: '11906', h: '16838', code: '9' },
+      pgMar: { top: '1418', right: '1418', bottom: '1418', left: '1701', header: '709', footer: '709', gutter: '0' },
+      cols: { space: '708' },
+      docGrid: { linePitch: '360' }
+    };
+
     const sectPrs = doc.getElementsByTagName('w:sectPr');
     if (sectPrs.length === 0) return;
     const sectPr = sectPrs[0];
@@ -1798,27 +2090,23 @@
     ref('w:footerReference', 'first', ids.footer3);
 
     const pgSz = doc.createElementNS(W_NS, 'w:pgSz');
-    pgSz.setAttribute('w:w', '11906');
-    pgSz.setAttribute('w:h', '16838');
-    pgSz.setAttribute('w:code', '9');
+    pgSz.setAttribute('w:w', layout.pgSz.w);
+    pgSz.setAttribute('w:h', layout.pgSz.h);
+    if (layout.pgSz.code) pgSz.setAttribute('w:code', layout.pgSz.code);
     sectPr.appendChild(pgSz);
 
     const pgMar = doc.createElementNS(W_NS, 'w:pgMar');
-    pgMar.setAttribute('w:top', '1418');
-    pgMar.setAttribute('w:right', '1418');
-    pgMar.setAttribute('w:bottom', '1418');
-    pgMar.setAttribute('w:left', '1701');
-    pgMar.setAttribute('w:header', '709');
-    pgMar.setAttribute('w:footer', '709');
-    pgMar.setAttribute('w:gutter', '0');
+    for (const [attr, val] of Object.entries(layout.pgMar)) {
+      pgMar.setAttribute('w:' + attr, val);
+    }
     sectPr.appendChild(pgMar);
 
     const cols = doc.createElementNS(W_NS, 'w:cols');
-    cols.setAttribute('w:space', '708');
+    cols.setAttribute('w:space', layout.cols.space);
     sectPr.appendChild(cols);
 
     const docGrid = doc.createElementNS(W_NS, 'w:docGrid');
-    docGrid.setAttribute('w:linePitch', '360');
+    docGrid.setAttribute('w:linePitch', layout.docGrid.linePitch);
     sectPr.appendChild(docGrid);
   }
 

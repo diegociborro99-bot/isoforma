@@ -753,6 +753,16 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
 
     <div class="options-row reveal">
       <label class="toggle">
+        <input type="checkbox" id="optJustify">
+        <span class="toggle-text">
+          <span class="toggle-title">Justificar resultado</span>
+          <span class="toggle-hint">Genera un informe detallado de por qué cada párrafo fue clasificado con un estilo concreto. Útil para auditar y verificar que la IA tomó buenas decisiones.</span>
+        </span>
+      </label>
+    </div>
+
+    <div class="options-row reveal">
+      <label class="toggle">
         <input type="checkbox" id="optBatch">
         <span class="toggle-text">
           <span class="toggle-title">Modo lote — varios documentos con el mismo referente</span>
@@ -1059,6 +1069,7 @@ const els = {
   optEnforceTypography:  document.getElementById('optEnforceTypography'),
   optNormalizeLists:     document.getElementById('optNormalizeLists'),
   optSemanticTypography: document.getElementById('optSemanticTypography'),
+  optJustify:           document.getElementById('optJustify'),
   resultNormativa:       document.getElementById('resultNormativa'),
   resultNormativaChecks: document.getElementById('resultNormativaChecks'),
   btnProcess: document.getElementById('btnProcess'),
@@ -1696,6 +1707,17 @@ async function processSingle() {
   renderFixes(s);
   renderNormativa(s.normativa);
   renderWarnings(state.warnings);
+
+  // Fase 13: Justification — show/hide button and auto-render based on checkbox
+  const justifyEnabled = !!(els.optJustify && els.optJustify.checked);
+  if (els.btnJustify) {
+    els.btnJustify.style.display = justifyEnabled ? '' : 'none';
+  }
+  if (justifyEnabled && s.justification && s.justification.length > 0) {
+    renderJustification(s.justification);
+    els.resultJustification.classList.add('show');
+    if (els.btnJustify) els.btnJustify.querySelector('span').textContent = 'Ocultar justificación';
+  }
 
   const okMsg = state.warnings.length
     ? `Formato aplicado con ${state.warnings.length} aviso${state.warnings.length === 1 ? '' : 's'}`
