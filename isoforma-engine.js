@@ -303,7 +303,9 @@
   async function process({
     refFile, contentFile, metadata, onProgress, outputType, autoFix,
     // Fase 12 — cumplimiento normativo §4 (default on).
-    enforceSpacing, enforceTypography, unwrapNarrative, normalizeLists, semanticTypography
+    enforceSpacing, enforceTypography, unwrapNarrative, normalizeLists, semanticTypography,
+    // Fase 15 — justificación inteligente de texto (default off).
+    justifyText
   }) {
     const progress = onProgress || (() => {});
     metadata = metadata || {};
@@ -321,6 +323,7 @@
     const doUnwrapNarrative  = unwrapNarrative  !== false;
     const doNormalizeLists   = normalizeLists   !== false;
     const doSemanticTypography = semanticTypography !== false;
+    const doJustifyText = justifyText === true; // default OFF
     const warnings = [];
     let fixes = {
       underline: 0, font: 0, allCaps: 0, emptyList: 0,
@@ -452,6 +455,18 @@
       );
     }
 
+    // Fase 15 — Justificación inteligente de texto.
+    // Se ejecuta DESPUÉS de typography/semantic y ANTES de listas
+    // porque el justify aplica w:jc a cada párrafo según su estilo,
+    // y necesita que los estilos ya estén asignados.
+    let justifyStats = { justified: 0, skippedTitle: 0, skippedShort: 0, skippedTable: 0, skippedCentered: 0 };
+    if (doJustifyText) {
+      progress('Aplicando justificación inteligente de texto');
+      justifyStats = await runStep('Justify alignment IA', () =>
+        enforceJustifyAlignment(docDoc)
+      );
+    }
+
     // Fase 12 · B4 — Tabulación de listas §4.2.4.3 a nivel de párrafo.
     // (Los símbolos de viñeta §4.2.4.2 y el indent del numbering.xml se
     // normalizan más tarde, tras el merge de numbering.)
@@ -571,6 +586,14 @@
             italicTerms: semanticStats.italicTerms,
             boldAlerts:  semanticStats.boldAlerts,
             runsSplit:   semanticStats.runsSplit
+          },
+          justify:    {
+            applied: doJustifyText,
+            justified: justifyStats.justified,
+            skippedTitle: justifyStats.skippedTitle,
+            skippedShort: justifyStats.skippedShort,
+            skippedTable: justifyStats.skippedTable,
+            skippedCentered: justifyStats.skippedCentered
           }
         },
         // Fase 13: justification log — every paragraph classification decision
@@ -2547,6 +2570,111 @@
       stats.touched++;
       stats.byStyle[styleId] = (stats.byStyle[styleId] || 0) + 1;
     }
+    return stats;
+  }
+
+  // ============================================================
+  // Fase 15: Justificación inteligente de texto (text-align: justify)
+  // Aplica <w:jc w:val="both"/> a párrafos donde sea tipográficamente
+  // correcto. La IA decide según el estilo asignado:
+  //   - Párrafos (FHJPrrafo): SIEMPRE justificados
+  //   - Viñetas/Listas (FHJVieta*, FHJLista*): justificados si el
+  //     texto tiene más de 40 caracteres (evita justify en items cortos)
+  //   - Subtítulos (FHJTtuloprrafo): NO se justifican (son left-aligned)
+  //   - Títulos (FHJTtulo1): NO se justifican (centrados o left)
+  //   - Párrafos dentro de tablas: NO (las celdas usan su propia alineación)
+  //   - Párrafos ya centrados: NO (respeta alineación explícita del autor)
+  // ============================================================
+  function enforceJustifyAlignment(doc) {
+    const stats = { justified: 0, skippedTitle: 0, skippedShort: 0, skippedTable: 0, skippedCentered: 0 };
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return stats;
+
+    // Collect paragraphs inside tables to skip them
+    const tableParas = new Set();
+    const tables = body.getElementsByTagName('w:tbl');
+    for (let i = 0; i < tables.length; i++) {
+      const paras = tables[i].getElementsByTagName('w:p');
+      for (let j = 0; j < paras.length; j++) tableParas.add(paras[j]);
+    }
+
+    // Styles that should NOT be justified (titles, headings)
+    const NO_JUSTIFY_STYLES = new Set([
+      'FHJTtulo1',
+      'FHJTtuloprrafo'
+    ]);
+
+    // Styles where justification depends on text length (> 40 chars)
+    const CONDITIONAL_JUSTIFY_STYLES = new Set([
+      'FHJVietaNivel1', 'FHJVietaNivel2', 'FHJVietaNivel3',
+      'FHJListaNivel1', 'FHJListaNivel2', 'FHJListaNivel3'
+    ]);
+
+    const MIN_LENGTH_FOR_JUSTIFY = 40;
+
+    const paragraphs = Array.from(body.getElementsByTagName('w:p'));
+    for (const p of paragraphs) {
+      // Skip table paragraphs
+      if (tableParas.has(p)) { stats.skippedTable++; continue; }
+
+      const styleId = getExistingPStyle(p) || 'FHJPrrafo';
+
+      // Skip titles / headings
+      if (NO_JUSTIFY_STYLES.has(styleId)) { stats.skippedTitle++; continue; }
+
+      // Check existing alignment — skip if already centered or right-aligned
+      let pPr = firstChildByName(p, 'w:pPr');
+      if (pPr) {
+        const existingJc = firstChildByName(pPr, 'w:jc');
+        if (existingJc) {
+          const val = existingJc.getAttribute('w:val');
+          if (val === 'center' || val === 'right') {
+            stats.skippedCentered++;
+            continue;
+          }
+        }
+      }
+
+      // For bullet/list items, only justify if text is long enough
+      if (CONDITIONAL_JUSTIFY_STYLES.has(styleId)) {
+        const text = getParagraphTextDom(p);
+        if (text.length < MIN_LENGTH_FOR_JUSTIFY) {
+          stats.skippedShort++;
+          continue;
+        }
+      }
+
+      // Apply justify: <w:jc w:val="both"/>
+      if (!pPr) {
+        pPr = doc.createElementNS(W_NS, 'w:pPr');
+        p.insertBefore(pPr, p.firstChild);
+      }
+
+      // Remove existing <w:jc> before setting
+      let jc = firstChildByName(pPr, 'w:jc');
+      if (jc) pPr.removeChild(jc);
+
+      jc = doc.createElementNS(W_NS, 'w:jc');
+      jc.setAttribute('w:val', 'both');
+
+      // Insert after <w:spacing> if it exists, else after <w:pStyle>, else at end
+      const spacing = firstChildByName(pPr, 'w:spacing');
+      const pStyle = firstChildByName(pPr, 'w:pStyle');
+      if (spacing && spacing.nextSibling) {
+        pPr.insertBefore(jc, spacing.nextSibling);
+      } else if (spacing) {
+        pPr.appendChild(jc);
+      } else if (pStyle && pStyle.nextSibling) {
+        pPr.insertBefore(jc, pStyle.nextSibling);
+      } else if (pStyle) {
+        pPr.appendChild(jc);
+      } else {
+        pPr.appendChild(jc);
+      }
+
+      stats.justified++;
+    }
+
     return stats;
   }
 

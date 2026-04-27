@@ -146,6 +146,14 @@ exports[`snapshot — document.xml post-procesado > produce una huella determini
     ],
     "list": 2,
     "normativa": {
+      "justify": {
+        "applied": false,
+        "justified": 0,
+        "skippedCentered": 0,
+        "skippedShort": 0,
+        "skippedTable": 0,
+        "skippedTitle": 0,
+      },
       "lists": {
         "applied": true,
         "bulletsRewritten": 0,

@@ -803,6 +803,16 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
 
     <div class="options-row reveal">
       <label class="toggle">
+        <input type="checkbox" id="optJustifyText">
+        <span class="toggle-text">
+          <span class="toggle-title">Texto justificado en el documento</span>
+          <span class="toggle-hint">Aplica alineación justificada (ambos márgenes) a los párrafos del documento resultante. La IA decide inteligentemente: justifica párrafos y viñetas largas, pero respeta títulos, subtítulos, elementos centrados y celdas de tabla.</span>
+        </span>
+      </label>
+    </div>
+
+    <div class="options-row reveal">
+      <label class="toggle">
         <input type="checkbox" id="optJustify">
         <span class="toggle-text">
           <span class="toggle-title">Justificar resultado</span>
@@ -1126,6 +1136,7 @@ const els = {
   optEnforceTypography:  document.getElementById('optEnforceTypography'),
   optNormalizeLists:     document.getElementById('optNormalizeLists'),
   optSemanticTypography: document.getElementById('optSemanticTypography'),
+  optJustifyText:        document.getElementById('optJustifyText'),
   optJustify:           document.getElementById('optJustify'),
   resultNormativa:       document.getElementById('resultNormativa'),
   resultNormativaChecks: document.getElementById('resultNormativaChecks'),
@@ -1531,7 +1542,8 @@ function readNormativaOpts() {
     enforceSpacing:      !els.optEnforceSpacing     || els.optEnforceSpacing.checked,
     enforceTypography:   !els.optEnforceTypography  || els.optEnforceTypography.checked,
     normalizeLists:      !els.optNormalizeLists     || els.optNormalizeLists.checked,
-    semanticTypography:  !els.optSemanticTypography || els.optSemanticTypography.checked
+    semanticTypography:  !els.optSemanticTypography || els.optSemanticTypography.checked,
+    justifyText:         !!(els.optJustifyText && els.optJustifyText.checked)
   };
 }
 
@@ -1582,6 +1594,16 @@ function renderNormativa(nrm) {
         ? nrm.semantic.italicTerms + ' cursivas · ' + nrm.semantic.boldAlerts + ' negritas'
         : 'desactivado',
       on: !!(nrm.semantic && nrm.semantic.applied)
+    },
+    {
+      key: 'justify',
+      label: 'Texto justificado (IA)',
+      detail: nrm.justify && nrm.justify.applied
+        ? nrm.justify.justified + ' párrafo' + (nrm.justify.justified === 1 ? '' : 's') + ' justificado' + (nrm.justify.justified === 1 ? '' : 's') +
+          ' · ' + nrm.justify.skippedTitle + ' títulos omitidos' +
+          (nrm.justify.skippedShort > 0 ? ' · ' + nrm.justify.skippedShort + ' cortos omitidos' : '')
+        : 'desactivado',
+      on: !!(nrm.justify && nrm.justify.applied)
     }
   ];
 
