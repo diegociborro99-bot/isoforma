@@ -283,6 +283,33 @@ section{position:relative;padding:120px 0;z-index:2}
 .result-warnings ul{list-style:none;padding:0;margin:0;border-top:1px solid var(--line-soft)}
 .result-warnings li{padding:12px 2px;border-bottom:1px solid var(--line-soft);font-size:13px;color:var(--ink-soft);line-height:1.5}
 .result-warnings li code{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--gold);letter-spacing:.08em;text-transform:uppercase;margin-right:10px;display:inline-block}
+/* Justification panel */
+.result-justification{padding:0 56px 32px;display:none;border-top:1px solid var(--line-soft);margin-top:0;padding-top:28px}
+.result-justification.show{display:block}
+.result-justification-title{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px;display:flex;align-items:center;gap:10px}
+.result-justification-title::before{content:'';width:6px;height:6px;background:var(--accent);border-radius:50%;flex-shrink:0}
+.result-justification-subtitle{font-family:'DM Sans',sans-serif;font-size:12.5px;color:var(--ink-mute);margin-bottom:16px;line-height:1.5}
+.justification-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.justification-filter{padding:6px 14px;border:1px solid var(--line);background:var(--white);font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute);cursor:pointer;transition:all .2s;border-radius:999px}
+.justification-filter:hover{border-color:var(--accent);color:var(--accent)}
+.justification-filter.active{background:var(--accent);color:var(--white);border-color:var(--accent)}
+.justification-table-wrap{max-height:420px;overflow-y:auto;border:1px solid var(--line);background:var(--white)}
+.justification-table{width:100%;border-collapse:collapse;font-family:'DM Sans',sans-serif;font-size:13px}
+.justification-table thead{position:sticky;top:0;z-index:1}
+.justification-table thead th{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mute);text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--bg)}
+.justification-table tbody td{padding:10px 14px;border-bottom:1px solid var(--line-soft);color:var(--ink-soft);vertical-align:top;line-height:1.45}
+.justification-table tbody tr:last-child td{border-bottom:0}
+.justification-table tbody tr:hover{background:var(--accent-soft)}
+.justification-table .j-text{max-width:320px;overflow-wrap:anywhere;color:var(--ink)}
+.justification-table .j-style{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.05em;color:var(--accent);white-space:nowrap}
+.justification-table .j-confidence{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}
+.justification-table .j-confidence.high{color:var(--success)}
+.justification-table .j-confidence.medium{color:var(--gold)}
+.justification-table .j-reason{font-size:12.5px;color:var(--ink-soft);line-height:1.5;max-width:280px}
+.justification-summary{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.justification-summary-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:var(--bg);border:1px solid var(--line-soft);font-family:'DM Sans',sans-serif;font-size:12.5px;color:var(--ink-soft)}
+.justification-summary-chip .j-count{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent);font-weight:600}
+
 .status-log.error{color:#B23838;flex-direction:column;gap:6px;padding:16px 24px;min-height:auto;text-align:left;align-items:flex-start}
 .status-log.error .err-head{font-weight:600;letter-spacing:.14em;text-transform:uppercase;font-size:10.5px}
 .status-log.error .err-body{font-family:'DM Sans',sans-serif;letter-spacing:0;text-transform:none;font-size:13.5px;color:#7A2626;line-height:1.5}
@@ -767,6 +794,10 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
           <span>Descargar .docx</span>
         </button>
+        <button class="btn-ghost" id="btnJustify">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          <span>Justificar resultado</span>
+        </button>
         <button class="btn-ghost" id="btnReset">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
           <span>Empezar otro</span>
@@ -788,6 +819,26 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
       <div class="result-warnings" id="resultWarnings">
         <div class="result-warnings-title">Avisos no bloqueantes</div>
         <ul id="resultWarningsList"></ul>
+      </div>
+      <div class="result-justification" id="resultJustification">
+        <div class="result-justification-title">Justificación del formateo</div>
+        <div class="result-justification-subtitle">Cada párrafo del documento fue analizado y clasificado automáticamente. Aquí puedes ver qué estilo se asignó a cada uno y por qué.</div>
+        <div class="justification-summary" id="justificationSummary"></div>
+        <div class="justification-filters" id="justificationFilters"></div>
+        <div class="justification-table-wrap">
+          <table class="justification-table">
+            <thead>
+              <tr>
+                <th>Nº</th>
+                <th>Texto</th>
+                <th>Estilo asignado</th>
+                <th>Confianza</th>
+                <th>Razón</th>
+              </tr>
+            </thead>
+            <tbody id="justificationTableBody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -1013,6 +1064,11 @@ const els = {
   btnProcess: document.getElementById('btnProcess'),
   btnDownload: document.getElementById('btnDownload'),
   btnReset: document.getElementById('btnReset'),
+  btnJustify: document.getElementById('btnJustify'),
+  resultJustification: document.getElementById('resultJustification'),
+  justificationSummary: document.getElementById('justificationSummary'),
+  justificationFilters: document.getElementById('justificationFilters'),
+  justificationTableBody: document.getElementById('justificationTableBody'),
   statusLog: document.getElementById('statusLog'),
   resultPanel: document.getElementById('resultPanel'),
   resultMeta: document.getElementById('resultMeta'),
@@ -1481,6 +1537,121 @@ function renderNormativa(nrm) {
   els.resultNormativa.style.display = '';
 }
 
+// ============================================================
+// Fase 13: Justification panel rendering
+// ============================================================
+function renderJustification(justification) {
+  if (!els.justificationTableBody || !justification || !justification.length) return;
+
+  // Store full data for filtering
+  state.justificationData = justification;
+
+  // Summary chips: count by style
+  const styleCounts = {};
+  const confidenceCounts = { high: 0, medium: 0 };
+  justification.forEach(j => {
+    const displayName = (IsoformaEngine.STYLE_DISPLAY_NAMES && IsoformaEngine.STYLE_DISPLAY_NAMES[j.style]) || j.style;
+    styleCounts[displayName] = (styleCounts[displayName] || 0) + 1;
+    if (j.confidence === 'medium') confidenceCounts.medium++;
+    else confidenceCounts.high++;
+  });
+
+  els.justificationSummary.innerHTML = '';
+  Object.entries(styleCounts)
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([name, count]) => {
+      const chip = document.createElement('div');
+      chip.className = 'justification-summary-chip';
+      chip.innerHTML = '<span class="j-count">' + count + '</span> ' + escapeHtml(name);
+      els.justificationSummary.appendChild(chip);
+    });
+  if (confidenceCounts.medium > 0) {
+    const chip = document.createElement('div');
+    chip.className = 'justification-summary-chip';
+    chip.innerHTML = '<span class="j-count" style="color:var(--gold)">' + confidenceCounts.medium + '</span> confianza media';
+    els.justificationSummary.appendChild(chip);
+  }
+
+  // Filter buttons
+  els.justificationFilters.innerHTML = '';
+  const allStyles = ['Todos', ...Object.keys(styleCounts).sort()];
+  if (confidenceCounts.medium > 0) allStyles.push('Solo confianza media');
+  allStyles.forEach((label, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'justification-filter' + (i === 0 ? ' active' : '');
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      els.justificationFilters.querySelectorAll('.justification-filter').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderJustificationTable(label === 'Todos' ? null : label === 'Solo confianza media' ? '__medium__' : label);
+    });
+    els.justificationFilters.appendChild(btn);
+  });
+
+  renderJustificationTable(null);
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderJustificationTable(filter) {
+  if (!state.justificationData) return;
+  const tbody = els.justificationTableBody;
+  tbody.innerHTML = '';
+
+  const styleNames = IsoformaEngine.STYLE_DISPLAY_NAMES || {};
+  let rows = state.justificationData;
+
+  if (filter === '__medium__') {
+    rows = rows.filter(j => j.confidence === 'medium');
+  } else if (filter) {
+    rows = rows.filter(j => (styleNames[j.style] || j.style) === filter);
+  }
+
+  // Cap at 500 rows for performance
+  const capped = rows.slice(0, 500);
+  capped.forEach((j, i) => {
+    const tr = document.createElement('tr');
+    const tdNum = document.createElement('td');
+    tdNum.style.cssText = 'font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--ink-mute);text-align:center';
+    tdNum.textContent = (filter ? i + 1 : state.justificationData.indexOf(j) + 1);
+    tr.appendChild(tdNum);
+
+    const tdText = document.createElement('td');
+    tdText.className = 'j-text';
+    tdText.textContent = j.text || '(vacío)';
+    tr.appendChild(tdText);
+
+    const tdStyle = document.createElement('td');
+    tdStyle.className = 'j-style';
+    tdStyle.textContent = styleNames[j.style] || j.style;
+    tr.appendChild(tdStyle);
+
+    const tdConf = document.createElement('td');
+    tdConf.className = 'j-confidence ' + j.confidence;
+    tdConf.textContent = j.confidence === 'high' ? 'Alta' : 'Media';
+    tr.appendChild(tdConf);
+
+    const tdReason = document.createElement('td');
+    tdReason.className = 'j-reason';
+    tdReason.textContent = j.explanation || j.reason;
+    tr.appendChild(tdReason);
+
+    tbody.appendChild(tr);
+  });
+
+  if (rows.length > 500) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.style.cssText = 'text-align:center;color:var(--ink-mute);font-size:12px;padding:16px';
+    td.textContent = '… y ' + (rows.length - 500) + ' párrafos más (mostrando los primeros 500)';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+}
+
 async function processSingle() {
   state.startTime = Date.now();
   const autoFix = !!(els.optAutoFix && els.optAutoFix.checked);
@@ -1717,6 +1888,27 @@ els.btnDownload.addEventListener('click', () => {
   if (state.outputBlob) saveAs(state.outputBlob, state.outputName);
 });
 
+// Fase 13: Justify result toggle
+if (els.btnJustify) {
+  els.btnJustify.addEventListener('click', () => {
+    const panel = els.resultJustification;
+    if (!panel) return;
+    const isVisible = panel.classList.contains('show');
+    if (isVisible) {
+      panel.classList.remove('show');
+      els.btnJustify.querySelector('span').textContent = 'Justificar resultado';
+    } else {
+      // Render justification data on first open
+      if (state.stats && state.stats.justification) {
+        renderJustification(state.stats.justification);
+      }
+      panel.classList.add('show');
+      els.btnJustify.querySelector('span').textContent = 'Ocultar justificación';
+      setTimeout(() => panel.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    }
+  });
+}
+
 if (els.btnDownloadZip) {
   els.btnDownloadZip.addEventListener('click', () => {
     if (state.batchZipBlob) saveAs(state.batchZipBlob, 'isoforma_lote.zip');
@@ -1773,6 +1965,12 @@ els.btnReset.addEventListener('click', () => {
   if (els.resultFixes) els.resultFixes.classList.remove('show');
   if (els.resultFixesChips) els.resultFixesChips.innerHTML = '';
   if (els.resultFixesSamples) els.resultFixesSamples.innerHTML = '';
+  if (els.resultJustification) els.resultJustification.classList.remove('show');
+  if (els.justificationTableBody) els.justificationTableBody.innerHTML = '';
+  if (els.justificationSummary) els.justificationSummary.innerHTML = '';
+  if (els.justificationFilters) els.justificationFilters.innerHTML = '';
+  state.justificationData = null;
+  if (els.btnJustify) els.btnJustify.querySelector('span').textContent = 'Justificar resultado';
   els.statusLog.textContent = '';
   els.statusLog.innerHTML = '';
   els.statusLog.className = 'status-log';

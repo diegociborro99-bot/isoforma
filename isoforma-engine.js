@@ -390,7 +390,7 @@
 
     progress('Aplicando estilos FHJ a párrafos');
     const restyleStats = await runStep('Aplicando estilos FHJ', () =>
-      applyFhjStylesDom(docDoc, { listAbstractIndex })
+      applyFhjStylesDom(docDoc, { listAbstractIndex, trackJustification: true })
     );
     if (restyleStats.lowConfidence && restyleStats.lowConfidence.length > 0) {
       warnings.push({
@@ -569,7 +569,9 @@
             boldAlerts:  semanticStats.boldAlerts,
             runsSplit:   semanticStats.runsSplit
           }
-        }
+        },
+        // Fase 13: justification log — every paragraph classification decision
+        justification: restyleStats.justification || []
       },
       warnings
     };
@@ -1145,22 +1147,65 @@
    * El listAbstractIndex permite, para un numId del body, recuperar el lvl 0/1/2
    * y su numFmt para distinguir bullet vs numérico.
    */
+  // ============================================================
+  // Justification reason map: human-readable descriptions for
+  // every classifier reason code. Used by the UI to show WHY
+  // each paragraph was classified the way it was.
+  // ============================================================
+  const JUSTIFICATION_REASONS = {
+    'empty':                 'Párrafo vacío — sin texto, se omite.',
+    'annex':                 'Detectado como título de ANEXO (patrón "ANEXO I/1/A…").',
+    'numbered-level-2plus':  'Numeración multi-nivel (ej. 1.1, 2.3.1) → subtítulo FHJ.',
+    'numbered-level-1':      'Numeración de primer nivel + texto corto en mayúsculas → título principal.',
+    'list-paragraph':        'Estilo Word "ListParagraph" sin numeración explícita → viñeta nivel 1.',
+    'list-item':             'Comienza con símbolo de viñeta (-, •, ▪…) → viñeta nivel 1.',
+    'analytical-procedure':  'Contiene "PROCEDIMIENTO ANALÍTICO" → título de sección (confianza media).',
+    'all-caps-short':        'Texto corto enteramente en MAYÚSCULAS → probable título (confianza media).',
+    'default':               'Ningún patrón de título/lista coincidió → párrafo normal.',
+    'preserved-fhj':         'Ya tenía estilo FHJ* asignado — se conserva tal cual.',
+    'no-text-anchor':        'Sin texto ni numeración — posible ancla de imagen/tabla, se conserva.',
+    'numPr-bullet':          'Word lo marcó como viñeta (bullet) en el XML → viñeta FHJ.',
+    'numPr-numbered':        'Word lo marcó como lista numerada en el XML → lista FHJ.',
+    // Bibliography / references (new Fase 13)
+    'bibliography-entry':    'Patrón bibliográfico detectado (autor, año, revista/editorial).',
+    'toc-entry':             'Línea de índice/sumario (título + puntos/tabuladores + nº página).',
+    'table-source-note':     'Nota de fuente/pie de tabla ("Fuente:", "Nota:", "Elaboración propia").',
+    'figure-caption':        'Pie de figura ("Figura N", "Gráfico N", "Imagen N").',
+    'table-caption':         'Encabezado de tabla ("Tabla N", "Cuadro N").',
+    'definition-term':       'Término de definición seguido de dos puntos y definición.',
+    'procedure-step':        'Paso de procedimiento numerado (ej. "1. Lavar…", texto largo).',
+  };
+
+  // Human-readable style names for the justification UI.
+  const STYLE_DISPLAY_NAMES = {
+    'FHJTtulo1':       'Título 1',
+    'FHJTtuloprrafo':  'Subtítulo',
+    'FHJPrrafo':       'Párrafo',
+    'FHJVietaNivel1':  'Viñeta nivel 1',
+    'FHJVietaNivel2':  'Viñeta nivel 2',
+    'FHJVietaNivel3':  'Viñeta nivel 3',
+    'FHJListaNivel1':  'Lista nivel 1',
+    'FHJListaNivel2':  'Lista nivel 2',
+    'FHJListaNivel3':  'Lista nivel 3'
+  };
+
   function applyFhjStylesDom(doc, opts) {
     opts = opts || {};
-    const listAbstractIndex = opts.listAbstractIndex || null; // { numId → {ilvl0,1,2: 'bullet'|'decimal'|'lowerLetter'|'lowerRoman'|'upperLetter'} }
+    const listAbstractIndex = opts.listAbstractIndex || null;
+    const trackJustification = opts.trackJustification !== false; // default ON
 
     let title1 = 0, titPar = 0, paragraph = 0, vignette = 0, list = 0, preserved = 0;
     const lowConfidence = [];
+    const justification = []; // Fase 13: full decision log
     const paragraphs = Array.from(doc.getElementsByTagName('w:p'));
     for (const p of paragraphs) {
       const rawText = getParagraphTextDom(p);
       const text = normalizeParagraphText(rawText);
 
-      // Inspeccionar el pStyle pre-existente y la presencia de numPr.
       const existingStyle = getExistingPStyle(p);
       const numPrInfo = readNumPr(p);
 
-      // 1) Trust path: el contenido ya viene marcado con FHJ* — lo respetamos.
+      // 1) Trust path: already FHJ-styled → preserve.
       if (existingStyle && /^FHJ/.test(existingStyle)) {
         preserved++;
         if (existingStyle === 'FHJTtulo1') title1++;
@@ -1170,12 +1215,31 @@
           vignette++;
           list++;
         }
+        if (trackJustification) {
+          justification.push({
+            text: (text || '').slice(0, 120),
+            style: existingStyle,
+            confidence: 'high',
+            reason: 'preserved-fhj',
+            explanation: JUSTIFICATION_REASONS['preserved-fhj']
+          });
+        }
         continue;
       }
 
-      // Sin texto → puede ser un párrafo "ancla" para una imagen o tabla.
-      // Si no tiene FHJ ni numPr, lo dejamos como está para no romper layout.
-      if (!text && !numPrInfo) continue;
+      // No text and no numPr → anchor paragraph (image/table placeholder).
+      if (!text && !numPrInfo) {
+        if (trackJustification && rawText) {
+          justification.push({
+            text: (rawText || '').slice(0, 120),
+            style: existingStyle || '(sin estilo)',
+            confidence: 'high',
+            reason: 'no-text-anchor',
+            explanation: JUSTIFICATION_REASONS['no-text-anchor']
+          });
+        }
+        continue;
+      }
 
       let style = null, confidence = 'high', reason = '';
 
@@ -1185,17 +1249,15 @@
           ? (listAbstractIndex[numPrInfo.numId][numPrInfo.ilvl] || null)
           : null;
         const isBullet = !fmt || fmt === 'bullet' || fmt === 'none';
-        const lvl = numPrInfo.ilvl + 1; // 0-based → 1-based
+        const lvl = numPrInfo.ilvl + 1;
         const family = isBullet ? 'FHJVietaNivel' : 'FHJListaNivel';
         const clamped = Math.max(1, Math.min(3, lvl));
         style = family + clamped;
         reason = 'numPr-' + (isBullet ? 'bullet' : 'numbered') + '-lvl' + lvl;
       } else if (existingStyle === 'ListParagraph') {
-        // 4) Sin numPr pero estilo "ListParagraph" — Word lo usa para bullets sueltos.
         style = 'FHJVietaNivel1';
         reason = 'list-paragraph';
       } else if (text && isListItem(text)) {
-        // 5) Bullet ASCII al inicio del texto.
         style = 'FHJVietaNivel1';
         reason = 'list-item';
       } else if (text) {
@@ -1217,9 +1279,21 @@
       else if (/^FHJVieta/.test(style)) { vignette++; list++; }
       else if (/^FHJLista/.test(style)) { list++; }
 
+      if (trackJustification) {
+        const baseReason = reason.replace(/-lvl\d+$/, '').replace(/^numPr-/, 'numPr-');
+        justification.push({
+          text: (text || '').slice(0, 120),
+          style: style,
+          confidence: confidence,
+          reason: reason,
+          explanation: JUSTIFICATION_REASONS[reason] || JUSTIFICATION_REASONS[baseReason] ||
+            ('Clasificado como ' + (STYLE_DISPLAY_NAMES[style] || style) + ' por regla "' + reason + '".')
+        });
+      }
+
       setParagraphStyleDom(doc, p, style);
     }
-    return { title1, titPar, paragraph, vignette, list, preserved, lowConfidence };
+    return { title1, titPar, paragraph, vignette, list, preserved, lowConfidence, justification };
   }
 
   /** Devuelve el styleId del <w:pStyle> dentro del <w:pPr> de un párrafo, o null. */
@@ -1376,20 +1450,42 @@
     }
 
     // FHJTtuloprrafo — numeración multi-nivel: "1.1", "1.1.", "1.1.-", "1.1)", "1.1.1.- ", etc.
-    // Admite cualquier combinación de ". - ) espacio" entre el número y el texto.
     if (/^\d+(\.\d+)+[\.\-\)\s]+\S/.test(text)) {
       return { style: 'FHJTtuloprrafo', confidence: 'high', reason: 'numbered-level-2plus' };
     }
 
-    // FHJTtulo1 — numeración de primer nivel ("1.-", "1.", "1)", "1 ") seguido de
-    // mayúscula Y con resto del texto que parece título (corto, ALL-CAPS o
-    // capitalizado, sin verbos imperativos típicos de pasos de procedimiento).
-    //
-    // Fase 7: el classifier viejo metía como Título 1 cualquier "1. Lavarse..."
-    // que es un paso, no un título. Endurecemos las condiciones:
-    //   - texto total ≤ 90 caracteres
-    //   - todo el texto tras el prefijo numérico es ALL-CAPS o tiene ratio alto
-    //     de mayúsculas (≥ 0.6 sobre las letras alfabéticas)
+    // ============================================================
+    // Fase 13: Enhanced classifier intelligence
+    // New pattern detections before the numbered-level-1 check.
+    // ============================================================
+
+    // Pie de figura: "Figura 1.", "Gráfico 2:", "Imagen 3 -", "Fig. 4."
+    if (/^(Figura|Fig\.|Gráfico|Grafico|Imagen|Ilustración|Ilustracion)\s*\d+/i.test(text) && text.length <= 200) {
+      return { style: 'FHJPrrafo', confidence: 'high', reason: 'figure-caption' };
+    }
+
+    // Encabezado de tabla: "Tabla 1.", "Cuadro 2:", "Tabla II."
+    if (/^(Tabla|Cuadro)\s*\d+/i.test(text) && text.length <= 200) {
+      return { style: 'FHJPrrafo', confidence: 'high', reason: 'table-caption' };
+    }
+
+    // Nota de fuente / pie de tabla: "Fuente:", "Nota:", "Elaboración propia", "*Nota:"
+    if (/^(\*?\s*)(Fuente|Nota|Elaboraci[oó]n\s+propia|Source)\s*[:\.]/i.test(text) && text.length <= 300) {
+      return { style: 'FHJPrrafo', confidence: 'high', reason: 'table-source-note' };
+    }
+
+    // Entrada bibliográfica: detectamos patrones comunes de citas
+    // "Apellido, N. (2020)." o "Apellido N. et al. (2019)" o "1. Apellido..."
+    if (isBibliographyEntry(text)) {
+      return { style: 'FHJPrrafo', confidence: 'high', reason: 'bibliography-entry' };
+    }
+
+    // Línea de índice/sumario: "OBJETO ........... 3" o "1.2 Alcance\t\t5"
+    if (/^.{3,80}\s*[\.·\u2026]{3,}\s*\d+\s*$/.test(text) || /^.{3,80}\t+\d+\s*$/.test(text)) {
+      return { style: 'FHJPrrafo', confidence: 'medium', reason: 'toc-entry' };
+    }
+
+    // FHJTtulo1 — numeración de primer nivel con texto título-like.
     const leadM = text.match(/^(\d+)[\.\-\)\s]+([A-ZÁÉÍÓÚÑ].*)$/);
     if (leadM) {
       const rest = leadM[2];
@@ -1401,7 +1497,10 @@
           return { style: 'FHJTtulo1', confidence: 'high', reason: 'numbered-level-1' };
         }
       }
-      // Si no cumple, es un paso de procedimiento — lo trataremos como párrafo.
+      // Fase 13: if numbered but doesn't look like a title, it's a procedure step
+      if (text.length > 90 || (leadM[2] && /^[a-záéíóúñ]/.test(leadM[2]))) {
+        return { style: 'FHJPrrafo', confidence: 'high', reason: 'procedure-step' };
+      }
     }
 
     // FHJTtulo1 por ancla — palabra clave sola, o casi (≤ 50 chars).
@@ -1419,6 +1518,19 @@
       return { style: 'FHJTtulo1', confidence: 'medium', reason: 'analytical-procedure' };
     }
 
+    // Fase 13: Término de definición — "Término: definición larga..."
+    // Must have a colon within first 60 chars and total length ≤ 300
+    if (text.length <= 300) {
+      const colonIdx = text.indexOf(':');
+      if (colonIdx > 2 && colonIdx < 60 && text.length > colonIdx + 10) {
+        const term = text.slice(0, colonIdx).trim();
+        // The term part should be short, capitalized, no periods
+        if (term.length >= 3 && term.length <= 55 && !/\./.test(term) && /^[A-ZÁÉÍÓÚÑ]/.test(term)) {
+          return { style: 'FHJPrrafo', confidence: 'medium', reason: 'definition-term' };
+        }
+      }
+    }
+
     // ALL-CAPS corto y denso en letras → probable título (confianza media).
     if (text.length > 0 && text.length <= 120) {
       const letters = text.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]/g, '');
@@ -1432,6 +1544,40 @@
     }
 
     return { style: 'FHJPrrafo', confidence: 'high', reason: 'default' };
+  }
+
+  /**
+   * Fase 13: Bibliography entry detector.
+   * Recognizes common academic/medical citation formats:
+   *   - "Apellido, N. (2020). Título. Revista, 10(2), 1-20."
+   *   - "Apellido N, Apellido B. Título. Editorial; 2019."
+   *   - "[1] Apellido, N. (2020)..."
+   *   - "Apellido et al. (2018)..."
+   */
+  function isBibliographyEntry(text) {
+    if (!text || text.length < 20 || text.length > 600) return false;
+    // Must contain a year in parentheses or after a semicolon/comma
+    const hasYear = /\b(19|20)\d{2}\b/.test(text);
+    if (!hasYear) return false;
+    // Common bibliography indicators
+    const indicators = [
+      /^\[?\d+\]?\s*[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+[\s,]/, // "[1] Apellido" or "1. Apellido"
+      /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s*,\s*[A-ZÁÉÍÓÚÑ]\./, // "Apellido, N."
+      /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+[A-ZÁÉÍÓÚÑ]{1,2}[\s,]/, // "Apellido AB,"
+      /et\s+al\./i, // "et al."
+      /\b(eds?\.|editors?|compilador)\b/i,
+      /\bpp?\.\s*\d+/i, // "pp. 123" or "p. 45"
+      /\bvol\.\s*\d+/i, // "vol. 3"
+      /\bISBN\b/i,
+      /\bDOI\b/i,
+      /\bdisponible\s+en\b/i // "disponible en: http..."
+    ];
+    let score = 0;
+    for (const re of indicators) {
+      if (re.test(text)) score++;
+    }
+    // Need at least 2 indicators + year to be confident
+    return score >= 2;
   }
 
   // Retro-compat: callers externos (tests antiguos, otros módulos) esperan string.
@@ -3059,7 +3205,7 @@
     return res && res.detected ? res.detected : { code: null, version: null, title: null };
   }
 
-  const api = { process, inspectContent, extractMetadata, IsoformaError };
+  const api = { process, inspectContent, extractMetadata, IsoformaError, JUSTIFICATION_REASONS, STYLE_DISPLAY_NAMES };
   if (isNode) {
     module.exports = api;
   } else {
