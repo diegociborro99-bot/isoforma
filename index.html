@@ -284,31 +284,81 @@ section{position:relative;padding:120px 0;z-index:2}
 .result-warnings li{padding:12px 2px;border-bottom:1px solid var(--line-soft);font-size:13px;color:var(--ink-soft);line-height:1.5}
 .result-warnings li code{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--gold);letter-spacing:.08em;text-transform:uppercase;margin-right:10px;display:inline-block}
 /* Justification panel */
-.result-justification{padding:0 56px 32px;display:none;border-top:1px solid var(--line-soft);margin-top:0;padding-top:28px}
-.result-justification.show{display:block}
-.result-justification-title{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px;display:flex;align-items:center;gap:10px}
-.result-justification-title::before{content:'';width:6px;height:6px;background:var(--accent);border-radius:50%;flex-shrink:0}
-.result-justification-subtitle{font-family:'DM Sans',sans-serif;font-size:12.5px;color:var(--ink-mute);margin-bottom:16px;line-height:1.5}
-.justification-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
-.justification-filter{padding:6px 14px;border:1px solid var(--line);background:var(--white);font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute);cursor:pointer;transition:all .2s;border-radius:999px}
-.justification-filter:hover{border-color:var(--accent);color:var(--accent)}
-.justification-filter.active{background:var(--accent);color:var(--white);border-color:var(--accent)}
-.justification-table-wrap{max-height:420px;overflow-y:auto;border:1px solid var(--line);background:var(--white)}
+.result-justification{padding:0 56px 40px;display:none;border-top:1px solid var(--line-soft);margin-top:0;padding-top:36px;position:relative;overflow:hidden}
+.result-justification.show{display:block;animation:justifySlideIn .6s var(--ease)}
+@keyframes justifySlideIn{0%{opacity:0;transform:translateY(24px)}100%{opacity:1;transform:translateY(0)}}
+.result-justification::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--gold),var(--accent));background-size:200% 100%;animation:justifyGradient 4s linear infinite}
+@keyframes justifyGradient{0%{background-position:0% 50%}100%{background-position:200% 50%}}
+.result-justification-header{display:flex;align-items:flex-start;gap:20px;margin-bottom:28px}
+.result-justification-icon{width:48px;height:48px;background:linear-gradient(135deg,var(--accent),var(--accent-glow));border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;animation:justifyIconPulse 3s ease-in-out infinite;box-shadow:0 4px 16px rgba(31,61,43,.15)}
+@keyframes justifyIconPulse{0%,100%{transform:scale(1);box-shadow:0 4px 16px rgba(31,61,43,.15)}50%{transform:scale(1.05);box-shadow:0 6px 24px rgba(31,61,43,.25)}}
+.result-justification-icon svg{width:24px;height:24px;color:var(--white)}
+.result-justification-title{font-family:'Instrument Serif',serif;font-size:28px;color:var(--ink);letter-spacing:-.01em;line-height:1.1;margin-bottom:6px}
+.result-justification-title em{color:var(--accent);font-style:italic}
+.result-justification-subtitle{font-family:'DM Sans',sans-serif;font-size:13.5px;color:var(--ink-soft);line-height:1.55}
+
+/* Summary donut + chips */
+.justification-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:24px}
+.justification-summary-chip{display:flex;align-items:center;gap:10px;padding:14px 16px;background:var(--white);border:1px solid var(--line);position:relative;overflow:hidden;transition:all .3s var(--ease);cursor:default}
+.justification-summary-chip:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow-md)}
+.justification-summary-chip::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--accent);transform:scaleY(0);transform-origin:bottom;transition:transform .4s var(--ease)}
+.justification-summary-chip:hover::before{transform:scaleY(1)}
+.justification-summary-chip .j-count{font-family:'Instrument Serif',serif;font-size:28px;color:var(--accent);line-height:1;min-width:32px}
+.justification-summary-chip .j-chip-label{font-family:'DM Sans',sans-serif;font-size:12px;color:var(--ink-soft);line-height:1.3}
+.justification-summary-chip.chip-warn .j-count{color:var(--gold)}
+.justification-summary-chip.chip-warn::before{background:var(--gold)}
+
+/* Filters */
+.justification-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--line-soft)}
+.justification-filter{padding:8px 16px;border:1px solid var(--line);background:var(--white);font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute);cursor:pointer;transition:all .25s var(--ease);border-radius:999px;position:relative;overflow:hidden}
+.justification-filter::before{content:'';position:absolute;inset:0;background:var(--accent);transform:scaleX(0);transform-origin:left;transition:transform .3s var(--ease);z-index:0}
+.justification-filter:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px)}
+.justification-filter.active{background:var(--accent);color:var(--white);border-color:var(--accent);box-shadow:0 3px 12px rgba(31,61,43,.2)}
+.justification-filter.active::before{transform:scaleX(1)}
+
+/* Table */
+.justification-table-wrap{max-height:500px;overflow-y:auto;border:1px solid var(--line);background:var(--white);border-radius:2px;box-shadow:inset 0 -40px 30px -30px rgba(245,243,238,.9)}
+.justification-table-wrap::-webkit-scrollbar{width:6px}
+.justification-table-wrap::-webkit-scrollbar-track{background:var(--bg)}
+.justification-table-wrap::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+.justification-table-wrap::-webkit-scrollbar-thumb:hover{background:var(--ink-mute)}
 .justification-table{width:100%;border-collapse:collapse;font-family:'DM Sans',sans-serif;font-size:13px}
 .justification-table thead{position:sticky;top:0;z-index:1}
-.justification-table thead th{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mute);text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--bg)}
-.justification-table tbody td{padding:10px 14px;border-bottom:1px solid var(--line-soft);color:var(--ink-soft);vertical-align:top;line-height:1.45}
+.justification-table thead th{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-mute);text-align:left;padding:12px 14px;border-bottom:2px solid var(--line);background:var(--bg)}
+.justification-table tbody tr{animation:justifyRowIn .4s var(--ease) both}
+.justification-table tbody tr:nth-child(1){animation-delay:0s}
+.justification-table tbody tr:nth-child(2){animation-delay:.03s}
+.justification-table tbody tr:nth-child(3){animation-delay:.06s}
+.justification-table tbody tr:nth-child(4){animation-delay:.09s}
+.justification-table tbody tr:nth-child(5){animation-delay:.12s}
+.justification-table tbody tr:nth-child(6){animation-delay:.15s}
+.justification-table tbody tr:nth-child(7){animation-delay:.18s}
+.justification-table tbody tr:nth-child(8){animation-delay:.21s}
+.justification-table tbody tr:nth-child(9){animation-delay:.24s}
+.justification-table tbody tr:nth-child(10){animation-delay:.27s}
+@keyframes justifyRowIn{0%{opacity:0;transform:translateX(-8px)}100%{opacity:1;transform:translateX(0)}}
+.justification-table tbody td{padding:12px 14px;border-bottom:1px solid var(--line-soft);color:var(--ink-soft);vertical-align:middle;line-height:1.45;transition:background .2s}
 .justification-table tbody tr:last-child td{border-bottom:0}
-.justification-table tbody tr:hover{background:var(--accent-soft)}
-.justification-table .j-text{max-width:320px;overflow-wrap:anywhere;color:var(--ink)}
-.justification-table .j-style{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.05em;color:var(--accent);white-space:nowrap}
-.justification-table .j-confidence{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}
-.justification-table .j-confidence.high{color:var(--success)}
-.justification-table .j-confidence.medium{color:var(--gold)}
-.justification-table .j-reason{font-size:12.5px;color:var(--ink-soft);line-height:1.5;max-width:280px}
-.justification-summary{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
-.justification-summary-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:var(--bg);border:1px solid var(--line-soft);font-family:'DM Sans',sans-serif;font-size:12.5px;color:var(--ink-soft)}
-.justification-summary-chip .j-count{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent);font-weight:600}
+.justification-table tbody tr:hover td{background:rgba(31,61,43,.03)}
+.justification-table .j-num{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-mute);text-align:center;width:36px}
+.justification-table .j-text{max-width:300px;overflow-wrap:anywhere;color:var(--ink);font-size:12.5px;line-height:1.5}
+.justification-table .j-style{white-space:nowrap}
+.justification-table .j-style-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.06em;font-weight:500}
+.justification-table .j-style-badge.st-titulo{background:rgba(31,61,43,.1);color:var(--accent)}
+.justification-table .j-style-badge.st-subtitulo{background:rgba(184,147,90,.12);color:#8B6D35}
+.justification-table .j-style-badge.st-parrafo{background:var(--bg);color:var(--ink-soft);border:1px solid var(--line-soft)}
+.justification-table .j-style-badge.st-vineta{background:rgba(42,107,68,.08);color:var(--success)}
+.justification-table .j-style-badge.st-lista{background:rgba(90,130,184,.1);color:#3B6FA0}
+.justification-table .j-confidence{text-align:center}
+.justification-table .j-conf-dot{display:inline-flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.justification-table .j-conf-dot::before{content:'';width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.justification-table .j-conf-dot.high::before{background:var(--success);box-shadow:0 0 6px rgba(42,107,68,.4)}
+.justification-table .j-conf-dot.high{color:var(--success)}
+.justification-table .j-conf-dot.medium::before{background:var(--gold);box-shadow:0 0 6px rgba(184,147,90,.4);animation:confPulse 2s ease-in-out infinite}
+.justification-table .j-conf-dot.medium{color:var(--gold)}
+@keyframes confPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(.8)}}
+.justification-table .j-reason{font-size:12px;color:var(--ink-soft);line-height:1.5;max-width:260px}
+.justification-table .j-reason-code{display:block;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--ink-mute);letter-spacing:.06em;margin-top:3px;opacity:.7}
 
 .status-log.error{color:#B23838;flex-direction:column;gap:6px;padding:16px 24px;min-height:auto;text-align:left;align-items:flex-start}
 .status-log.error .err-head{font-weight:600;letter-spacing:.14em;text-transform:uppercase;font-size:10.5px}
@@ -831,8 +881,15 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
         <ul id="resultWarningsList"></ul>
       </div>
       <div class="result-justification" id="resultJustification">
-        <div class="result-justification-title">Justificación del formateo</div>
-        <div class="result-justification-subtitle">Cada párrafo del documento fue analizado y clasificado automáticamente. Aquí puedes ver qué estilo se asignó a cada uno y por qué.</div>
+        <div class="result-justification-header">
+          <div class="result-justification-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
+          </div>
+          <div>
+            <div class="result-justification-title">Justificación del <em>formateo</em></div>
+            <div class="result-justification-subtitle">Cada párrafo del documento fue analizado y clasificado automáticamente por la IA. Aquí puedes auditar qué estilo se asignó a cada uno y por qué.</div>
+          </div>
+        </div>
         <div class="justification-summary" id="justificationSummary"></div>
         <div class="justification-filters" id="justificationFilters"></div>
         <div class="justification-table-wrap">
@@ -1573,13 +1630,13 @@ function renderJustification(justification) {
     .forEach(([name, count]) => {
       const chip = document.createElement('div');
       chip.className = 'justification-summary-chip';
-      chip.innerHTML = '<span class="j-count">' + count + '</span> ' + escapeHtml(name);
+      chip.innerHTML = '<span class="j-count">' + count + '</span><span class="j-chip-label">' + escapeHtml(name) + '</span>';
       els.justificationSummary.appendChild(chip);
     });
   if (confidenceCounts.medium > 0) {
     const chip = document.createElement('div');
-    chip.className = 'justification-summary-chip';
-    chip.innerHTML = '<span class="j-count" style="color:var(--gold)">' + confidenceCounts.medium + '</span> confianza media';
+    chip.className = 'justification-summary-chip chip-warn';
+    chip.innerHTML = '<span class="j-count">' + confidenceCounts.medium + '</span><span class="j-chip-label">Confianza media</span>';
     els.justificationSummary.appendChild(chip);
   }
 
@@ -1620,12 +1677,21 @@ function renderJustificationTable(filter) {
     rows = rows.filter(j => (styleNames[j.style] || j.style) === filter);
   }
 
+  // Style → badge class mapping
+  const styleBadgeClass = {
+    'FHJTtulo1': 'st-titulo',
+    'FHJTtuloprrafo': 'st-subtitulo',
+    'FHJPrrafo': 'st-parrafo',
+    'FHJVietaNivel1': 'st-vineta', 'FHJVietaNivel2': 'st-vineta', 'FHJVietaNivel3': 'st-vineta',
+    'FHJListaNivel1': 'st-lista', 'FHJListaNivel2': 'st-lista', 'FHJListaNivel3': 'st-lista'
+  };
+
   // Cap at 500 rows for performance
   const capped = rows.slice(0, 500);
   capped.forEach((j, i) => {
     const tr = document.createElement('tr');
     const tdNum = document.createElement('td');
-    tdNum.style.cssText = 'font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--ink-mute);text-align:center';
+    tdNum.className = 'j-num';
     tdNum.textContent = (filter ? i + 1 : state.justificationData.indexOf(j) + 1);
     tr.appendChild(tdNum);
 
@@ -1636,17 +1702,23 @@ function renderJustificationTable(filter) {
 
     const tdStyle = document.createElement('td');
     tdStyle.className = 'j-style';
-    tdStyle.textContent = styleNames[j.style] || j.style;
+    const badgeCls = styleBadgeClass[j.style] || 'st-parrafo';
+    const displayName = styleNames[j.style] || j.style;
+    tdStyle.innerHTML = '<span class="j-style-badge ' + badgeCls + '">' + escapeHtml(displayName) + '</span>';
     tr.appendChild(tdStyle);
 
     const tdConf = document.createElement('td');
-    tdConf.className = 'j-confidence ' + j.confidence;
-    tdConf.textContent = j.confidence === 'high' ? 'Alta' : 'Media';
+    tdConf.className = 'j-confidence';
+    const confCls = j.confidence === 'high' ? 'high' : 'medium';
+    const confLabel = j.confidence === 'high' ? 'Alta' : 'Media';
+    tdConf.innerHTML = '<span class="j-conf-dot ' + confCls + '">' + confLabel + '</span>';
     tr.appendChild(tdConf);
 
     const tdReason = document.createElement('td');
     tdReason.className = 'j-reason';
-    tdReason.textContent = j.explanation || j.reason;
+    const explanation = j.explanation || j.reason || '';
+    const reasonCode = j.reason || '';
+    tdReason.innerHTML = escapeHtml(explanation) + (reasonCode ? '<span class="j-reason-code">' + escapeHtml(reasonCode) + '</span>' : '');
     tr.appendChild(tdReason);
 
     tbody.appendChild(tr);
