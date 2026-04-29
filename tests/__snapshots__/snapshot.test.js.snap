@@ -171,8 +171,14 @@ exports[`snapshot — document.xml post-procesado > produce una huella determini
         "paragraphs": 0,
       },
       "quality": {
+        "keepLines": 6,
+        "keepNext": 6,
+        "pageBreakBefore": 3,
         "postTableSpacing": 1,
+        "preTableSpacing": 0,
+        "tableCellMargin": 1,
         "tableCentered": 1,
+        "tableKeepTogether": 1,
         "widowOrphan": 14,
       },
       "semantic": {

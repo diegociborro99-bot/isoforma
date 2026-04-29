@@ -440,6 +440,71 @@ footer{padding:60px 0 40px;border-top:1px solid var(--line);position:relative;z-
 @keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(.85)}}
 @keyframes fade-up{0%{opacity:0;transform:translateY(20px)}100%{opacity:1;transform:translateY(0)}}
 
+/* ─── Fase 18: Premium processing overlay ─── */
+.processing-overlay{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(15,21,17,.65);backdrop-filter:blur(24px) saturate(1.2);-webkit-backdrop-filter:blur(24px) saturate(1.2);opacity:0;transition:opacity .5s var(--ease)}
+.processing-overlay.visible{display:flex;opacity:1}
+.processing-overlay.fade-out{opacity:0}
+.processing-card{position:relative;width:480px;max-width:92vw;background:var(--white);border-radius:24px;padding:56px 48px 48px;box-shadow:0 40px 80px rgba(15,21,17,.25),0 0 0 1px rgba(15,21,17,.06);overflow:hidden;transform:scale(.92) translateY(20px);transition:transform .6s var(--ease-spring)}
+.processing-overlay.visible .processing-card{transform:scale(1) translateY(0)}
+.processing-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--gold),var(--accent));background-size:300% 100%;animation:processingGradient 2s linear infinite}
+@keyframes processingGradient{0%{background-position:0 0}100%{background-position:300% 0}}
+
+/* Document morphing icon */
+.proc-icon-wrap{width:80px;height:80px;margin:0 auto 32px;position:relative}
+.proc-doc{width:80px;height:80px;position:relative}
+.proc-doc-page{position:absolute;width:56px;height:72px;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:6px;border:2px solid var(--accent);background:var(--white);box-shadow:0 4px 16px rgba(31,61,43,.1)}
+.proc-doc-fold{position:absolute;top:0;right:0;width:16px;height:16px;background:var(--accent-soft);border-bottom-left-radius:4px;border-left:2px solid var(--accent);border-bottom:2px solid var(--accent)}
+.proc-doc-lines{position:absolute;top:22px;left:10px;right:10px;display:flex;flex-direction:column;gap:5px}
+.proc-doc-line{height:2px;border-radius:1px;background:var(--line);transform-origin:left;animation:lineShimmer 2s ease-in-out infinite}
+.proc-doc-line:nth-child(1){width:70%;animation-delay:0s}
+.proc-doc-line:nth-child(2){width:100%;animation-delay:.2s}
+.proc-doc-line:nth-child(3){width:85%;animation-delay:.4s}
+.proc-doc-line:nth-child(4){width:60%;animation-delay:.6s}
+.proc-doc-line:nth-child(5){width:90%;animation-delay:.8s}
+@keyframes lineShimmer{0%,100%{background:var(--line)}50%{background:var(--accent)}}
+
+/* Spinning rings */
+.proc-ring{position:absolute;inset:-8px;border:1.5px solid transparent;border-top-color:var(--accent);border-radius:50%;animation:procSpin 3s linear infinite;opacity:.4}
+.proc-ring:nth-child(2){inset:-16px;border-top-color:var(--gold);animation-duration:5s;animation-direction:reverse;opacity:.25}
+
+/* Particles */
+.proc-particles{position:absolute;inset:-40px;pointer-events:none;overflow:hidden}
+.proc-particle{position:absolute;width:4px;height:4px;border-radius:50%;opacity:0}
+.proc-particle:nth-child(odd){background:var(--accent)}
+.proc-particle:nth-child(even){background:var(--gold)}
+.proc-particle.active{animation:particleFloat 2.5s var(--ease) forwards}
+@keyframes particleFloat{0%{opacity:0;transform:translate(0,0) scale(0)}20%{opacity:.8;transform:scale(1)}100%{opacity:0;transform:translate(var(--px),var(--py)) scale(0)}}
+
+/* Title & subtitle */
+.proc-title{font-family:'Instrument Serif',serif;font-size:28px;text-align:center;color:var(--ink);margin-bottom:8px;letter-spacing:-.02em}
+.proc-subtitle{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;text-align:center;color:var(--ink-mute);margin-bottom:36px}
+
+/* Step list */
+.proc-steps{list-style:none;display:flex;flex-direction:column;gap:0}
+.proc-step{display:flex;align-items:center;gap:16px;padding:14px 0;border-top:1px solid var(--line-soft);font-size:14px;color:var(--ink-mute);transition:all .4s var(--ease);position:relative}
+.proc-step:last-child{border-bottom:1px solid var(--line-soft)}
+.proc-step-icon{width:24px;height:24px;border-radius:50%;border:1.5px solid var(--line);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .4s var(--ease);position:relative}
+.proc-step-icon::after{content:'';width:8px;height:8px;border-radius:50%;background:transparent;transition:all .3s var(--ease)}
+.proc-step.active{color:var(--accent)}
+.proc-step.active .proc-step-icon{border-color:var(--accent);box-shadow:0 0 0 4px rgba(31,61,43,.1)}
+.proc-step.active .proc-step-icon::after{background:var(--accent);animation:stepPulse 1.2s ease-in-out infinite}
+.proc-step.done{color:var(--ink)}
+.proc-step.done .proc-step-icon{border-color:var(--success);background:var(--success)}
+.proc-step.done .proc-step-icon::after{width:10px;height:6px;border-radius:0;background:transparent;border-left:2px solid var(--white);border-bottom:2px solid var(--white);transform:rotate(-45deg) translate(1px,-1px);animation:drawCheckProc .3s var(--ease)}
+.proc-step-label{font-family:'DM Sans',sans-serif;font-weight:500;transition:color .3s}
+.proc-step-detail{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.1em;color:var(--ink-mute);opacity:0;transition:opacity .3s}
+.proc-step.done .proc-step-detail{opacity:1}
+@keyframes stepPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(.7);opacity:.5}}
+@keyframes drawCheckProc{0%{clip-path:inset(0 100% 0 0)}100%{clip-path:inset(0 0 0 0)}}
+@keyframes procSpin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+
+/* Progress bar */
+.proc-progress{margin-top:28px;height:3px;background:var(--line-soft);border-radius:2px;overflow:hidden}
+.proc-progress-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--gold));border-radius:2px;transition:width .6s var(--ease)}
+
+/* Elapsed time */
+.proc-elapsed{text-align:center;margin-top:16px;font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.14em;color:var(--ink-mute)}
+
 /* Responsive */
 @media(max-width:900px){
   .wrap{padding:0 24px}
@@ -741,75 +806,24 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
       </div>
     </div>
 
-    <div class="options-row reveal">
+    <!-- Fase 18: autoFix siempre activo — toggle oculto -->
+    <div class="options-row reveal" style="display:none">
       <label class="toggle">
         <input type="checkbox" id="optAutoFix" checked>
         <span class="toggle-text">
           <span class="toggle-title">Corregir automáticamente antes de exportar</span>
-          <span class="toggle-hint">Elimina subrayados del cuerpo, reescribe fuentes no-Arial a Arial, descapitaliza párrafos en MAYÚSCULAS y borra ítems de lista vacíos. No toca títulos ni imágenes.</span>
+          <span class="toggle-hint">Elimina subrayados del cuerpo, reescribe fuentes no-Arial a Arial, descapitaliza párrafos en MAYÚSCULAS y borra ítems de lista vacíos.</span>
         </span>
       </label>
     </div>
 
-    <div class="options-group reveal">
-      <div class="options-group-title">Cumplimiento normativo §4 <span class="options-group-badge">Nuevo</span></div>
-      <div class="options-group-hint">Basado en el documento <em>Recomendaciones para la elaboración de documentos</em> del Hospital de Jove (V_0_1). Todo activado por defecto para máxima adherencia.</div>
-      <div class="options-row">
-        <label class="toggle">
-          <input type="checkbox" id="optUnwrapNarrative" checked>
-          <span class="toggle-text">
-            <span class="toggle-title">Reconstruir prosa fragmentada</span>
-            <span class="toggle-hint">Fusiona párrafos cortados a la mitad (típico de texto pegado desde web). Solo afecta párrafos-cuerpo sin puntuación fuerte al final.</span>
-          </span>
-        </label>
-      </div>
-      <div class="options-row">
-        <label class="toggle">
-          <input type="checkbox" id="optEnforceSpacing" checked>
-          <span class="toggle-text">
-            <span class="toggle-title">Forzar espaciado e interlineado §4.3</span>
-            <span class="toggle-hint">Arrebata el espaciado heredado del contenido original y aplica los valores canónicos por estilo (antes/después en pt · interlineado 1,5).</span>
-          </span>
-        </label>
-      </div>
-      <div class="options-row">
-        <label class="toggle">
-          <input type="checkbox" id="optEnforceTypography" checked>
-          <span class="toggle-text">
-            <span class="toggle-title">Forzar Arial 10 §4.2.1</span>
-            <span class="toggle-hint">Reescribe fuente y tamaño en todo el cuerpo (Arial 10pt). Las notas bajo tabla que empiezan por <em>Fuente:</em> van a Arial 9 cursiva §4.2.3.2.</span>
-          </span>
-        </label>
-      </div>
-      <div class="options-row">
-        <label class="toggle">
-          <input type="checkbox" id="optNormalizeLists" checked>
-          <span class="toggle-text">
-            <span class="toggle-title">Normalizar listas §4.2.4</span>
-            <span class="toggle-hint">Símbolos canónicos <strong>●</strong>/<strong>–</strong>/<strong>▪</strong> por nivel y tabulación exacta (0 → 0,63 → 1,27 → 2,54 cm) según §4.2.4.3.</span>
-          </span>
-        </label>
-      </div>
-      <div class="options-row">
-        <label class="toggle">
-          <input type="checkbox" id="optSemanticTypography" checked>
-          <span class="toggle-text">
-            <span class="toggle-title">Tipografía semántica §4.2.2</span>
-            <span class="toggle-hint">Latinismos e italianismos (<em>in situ</em>, <em>ad hoc</em>, <em>et al.</em>) en cursiva; palabras-alerta (<strong>ADVERTENCIA</strong>, <strong>ATENCIÓN</strong>) en negrita.</span>
-          </span>
-        </label>
-      </div>
-    </div>
-
-    <div class="options-row reveal">
-      <label class="toggle">
-        <input type="checkbox" id="optJustifyText">
-        <span class="toggle-text">
-          <span class="toggle-title">Texto justificado en el documento</span>
-          <span class="toggle-hint">Aplica alineación justificada (ambos márgenes) a los párrafos del documento resultante. La IA decide inteligentemente: justifica párrafos y viñetas largas, pero respeta títulos, subtítulos, elementos centrados y celdas de tabla.</span>
-        </span>
-      </label>
-    </div>
+    <!-- Fase 18: toggles de formato eliminados — la IA siempre aplica todo al 100% -->
+    <input type="hidden" id="optUnwrapNarrative" value="on">
+    <input type="hidden" id="optEnforceSpacing" value="on">
+    <input type="hidden" id="optEnforceTypography" value="on">
+    <input type="hidden" id="optNormalizeLists" value="on">
+    <input type="hidden" id="optSemanticTypography" value="on">
+    <input type="hidden" id="optJustifyText" value="on">
 
     <div class="options-row reveal">
       <label class="toggle">
@@ -843,6 +857,60 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
     </div>
 
     <div class="status-log" id="statusLog"></div>
+
+    <!-- Fase 18: Premium processing overlay -->
+    <div class="processing-overlay" id="processingOverlay">
+      <div class="processing-card">
+        <div class="proc-icon-wrap">
+          <div class="proc-ring"></div>
+          <div class="proc-ring"></div>
+          <div class="proc-particles" id="procParticles"></div>
+          <div class="proc-doc">
+            <div class="proc-doc-page">
+              <div class="proc-doc-fold"></div>
+              <div class="proc-doc-lines">
+                <div class="proc-doc-line"></div>
+                <div class="proc-doc-line"></div>
+                <div class="proc-doc-line"></div>
+                <div class="proc-doc-line"></div>
+                <div class="proc-doc-line"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="proc-title">Transformando documento</div>
+        <div class="proc-subtitle" id="procSubtitle">Analizando estructura</div>
+        <ul class="proc-steps" id="procSteps">
+          <li class="proc-step" data-step="analyze">
+            <span class="proc-step-icon"></span>
+            <span class="proc-step-label">Analizando estructura del documento</span>
+            <span class="proc-step-detail"></span>
+          </li>
+          <li class="proc-step" data-step="styles">
+            <span class="proc-step-icon"></span>
+            <span class="proc-step-label">Extrayendo estilos del referente</span>
+            <span class="proc-step-detail"></span>
+          </li>
+          <li class="proc-step" data-step="apply">
+            <span class="proc-step-icon"></span>
+            <span class="proc-step-label">Aplicando formato inteligente</span>
+            <span class="proc-step-detail"></span>
+          </li>
+          <li class="proc-step" data-step="tables">
+            <span class="proc-step-icon"></span>
+            <span class="proc-step-label">Optimizando tablas y figuras</span>
+            <span class="proc-step-detail"></span>
+          </li>
+          <li class="proc-step" data-step="quality">
+            <span class="proc-step-icon"></span>
+            <span class="proc-step-label">Control de calidad final</span>
+            <span class="proc-step-detail"></span>
+          </li>
+        </ul>
+        <div class="proc-progress"><div class="proc-progress-fill" id="procProgressFill"></div></div>
+        <div class="proc-elapsed" id="procElapsed">0.0s</div>
+      </div>
+    </div>
 
     <div class="result" id="resultPanel">
       <div class="result-header">
@@ -1373,6 +1441,143 @@ if (els.optBatch) {
   });
 }
 
+/* ─── Fase 18: Premium processing overlay controller ─── */
+const procOverlay = document.getElementById('processingOverlay');
+const procStepsEl = document.getElementById('procSteps');
+const procSubtitle = document.getElementById('procSubtitle');
+const procProgressFill = document.getElementById('procProgressFill');
+const procElapsedEl = document.getElementById('procElapsed');
+const procParticlesEl = document.getElementById('procParticles');
+let procTimer = null;
+let procStartTime = 0;
+let particleInterval = null;
+
+const PROC_STEP_MAP = {
+  'Leyendo ZIP del contenido': 'analyze',
+  'Detectando cabecera FHJ': 'analyze',
+  'Inspeccionando contenido': 'analyze',
+  'Preflight del referente': 'styles',
+  'Extrayendo estilos del referente': 'styles',
+  'Importando cabeceras/pies': 'styles',
+  'Clasificando párrafos': 'apply',
+  'Aplicando estilos al cuerpo': 'apply',
+  'Inyectando Datos generales': 'apply',
+  'Numerando tablas': 'tables',
+  'Numerando figuras': 'tables',
+  'Tabla estilada': 'tables',
+  'Enforcement calidad': 'quality',
+  'Personalizando header2': 'quality',
+  'Generando ZIP final': 'quality'
+};
+
+const PROC_SUBTITLES = {
+  analyze: 'Analizando estructura',
+  styles: 'Extrayendo estilos',
+  apply: 'Aplicando formato',
+  tables: 'Optimizando elementos',
+  quality: 'Puliendo detalles'
+};
+
+const PROC_PROGRESS = { analyze: 15, styles: 35, apply: 60, tables: 80, quality: 95 };
+
+function spawnParticle() {
+  if (!procParticlesEl) return;
+  const p = document.createElement('div');
+  p.className = 'proc-particle';
+  const angle = Math.random() * Math.PI * 2;
+  const dist = 30 + Math.random() * 60;
+  p.style.left = '50%';
+  p.style.top = '50%';
+  p.style.setProperty('--px', Math.cos(angle) * dist + 'px');
+  p.style.setProperty('--py', Math.sin(angle) * dist + 'px');
+  procParticlesEl.appendChild(p);
+  requestAnimationFrame(() => p.classList.add('active'));
+  setTimeout(() => p.remove(), 2600);
+}
+
+function showProcessingOverlay() {
+  procOverlay.classList.remove('fade-out');
+  procOverlay.classList.add('visible');
+  procStartTime = Date.now();
+  // Reset all steps
+  procStepsEl.querySelectorAll('.proc-step').forEach(s => {
+    s.classList.remove('active','done');
+    s.querySelector('.proc-step-detail').textContent = '';
+  });
+  procProgressFill.style.width = '0%';
+  procElapsedEl.textContent = '0.0s';
+  procSubtitle.textContent = 'Preparando...';
+  // Start timer
+  procTimer = setInterval(() => {
+    const e = ((Date.now() - procStartTime) / 1000).toFixed(1);
+    procElapsedEl.textContent = e + 's';
+  }, 100);
+  // Start particles
+  particleInterval = setInterval(spawnParticle, 400);
+  document.body.style.overflow = 'hidden';
+}
+
+function updateProcessingStep(msg) {
+  // Map onProgress message to a step
+  let matched = null;
+  for (const [key, step] of Object.entries(PROC_STEP_MAP)) {
+    if (msg.includes(key) || msg.toLowerCase().includes(key.toLowerCase())) {
+      matched = step;
+      break;
+    }
+  }
+  if (!matched) {
+    // Try prefix match
+    if (msg.match(/^(Ley|Detect|Inspec)/i)) matched = 'analyze';
+    else if (msg.match(/^(Preflight|Extra|Import)/i)) matched = 'styles';
+    else if (msg.match(/^(Clasif|Aplic|Inyect)/i)) matched = 'apply';
+    else if (msg.match(/^(Numer|Tabla)/i)) matched = 'tables';
+    else matched = 'quality';
+  }
+
+  const steps = procStepsEl.querySelectorAll('.proc-step');
+  const stepOrder = ['analyze','styles','apply','tables','quality'];
+  const idx = stepOrder.indexOf(matched);
+
+  steps.forEach((s, i) => {
+    const stepName = s.dataset.step;
+    if (stepOrder.indexOf(stepName) < idx) {
+      s.classList.remove('active');
+      s.classList.add('done');
+    } else if (stepName === matched) {
+      s.classList.add('active');
+      s.classList.remove('done');
+    } else {
+      s.classList.remove('active','done');
+    }
+  });
+
+  procSubtitle.textContent = PROC_SUBTITLES[matched] || msg;
+  procProgressFill.style.width = (PROC_PROGRESS[matched] || 50) + '%';
+}
+
+function hideProcessingOverlay() {
+  procProgressFill.style.width = '100%';
+  // Mark all steps done
+  procStepsEl.querySelectorAll('.proc-step').forEach(s => {
+    s.classList.remove('active');
+    s.classList.add('done');
+  });
+  procSubtitle.textContent = 'Completado';
+  clearInterval(procTimer);
+  clearInterval(particleInterval);
+  const elapsed = ((Date.now() - procStartTime) / 1000).toFixed(1);
+  procElapsedEl.textContent = elapsed + 's';
+  // Fade out after a short celebration
+  setTimeout(() => {
+    procOverlay.classList.add('fade-out');
+    setTimeout(() => {
+      procOverlay.classList.remove('visible','fade-out');
+      document.body.style.overflow = '';
+    }, 500);
+  }, 800);
+}
+
 function showStatus(msg, type = 'active') {
   els.statusLog.textContent = msg;
   els.statusLog.className = 'status-log ' + type;
@@ -1537,13 +1742,14 @@ function formatBytes(bytes) {
 
 /** Lee los toggles de cumplimiento normativo §4 en un objeto para pasar al engine. */
 function readNormativaOpts() {
+  // Fase 18: la IA siempre aplica todo al 100% — sin toggles de usuario
   return {
-    unwrapNarrative:     !els.optUnwrapNarrative    || els.optUnwrapNarrative.checked,
-    enforceSpacing:      !els.optEnforceSpacing     || els.optEnforceSpacing.checked,
-    enforceTypography:   !els.optEnforceTypography  || els.optEnforceTypography.checked,
-    normalizeLists:      !els.optNormalizeLists     || els.optNormalizeLists.checked,
-    semanticTypography:  !els.optSemanticTypography || els.optSemanticTypography.checked,
-    justifyText:         !!(els.optJustifyText && els.optJustifyText.checked)
+    unwrapNarrative:     true,
+    enforceSpacing:      true,
+    enforceTypography:   true,
+    normalizeLists:      true,
+    semanticTypography:  true,
+    justifyText:         true
   };
 }
 
@@ -1775,7 +1981,7 @@ function renderJustificationTable(filter) {
 
 async function processSingle() {
   state.startTime = Date.now();
-  const autoFix = !!(els.optAutoFix && els.optAutoFix.checked);
+  const autoFix = true; // Fase 18: siempre activo
   const normativaOpts = readNormativaOpts();
   const result = await IsoformaEngine.process({
     refFile: state.refFile,
@@ -1787,7 +1993,7 @@ async function processSingle() {
     },
     autoFix,
     ...normativaOpts,
-    onProgress: (msg) => showStatus(msg, 'active')
+    onProgress: (msg) => { showStatus(msg, 'active'); updateProcessingStep(msg); }
   });
   state.outputBlob = result.blob;
   state.stats = result.stats;
@@ -1920,7 +2126,7 @@ function renderBatchTable(rows) {
 
 async function processBatch() {
   state.startTime = Date.now();
-  const autoFix = !!(els.optAutoFix && els.optAutoFix.checked);
+  const autoFix = true; // Fase 18: siempre activo
   const normativaOpts = readNormativaOpts();
   const refBuffer = await state.refFile.arrayBuffer(); // se reutiliza
   const files = state.contentFiles.slice();
@@ -1997,6 +2203,9 @@ async function processBatch() {
 els.btnProcess.addEventListener('click', async () => {
   els.btnProcess.classList.add('loading');
   els.btnProcess.disabled = true;
+  // Fase 18: show premium overlay for single mode
+  const useSingleOverlay = state.mode !== 'batch';
+  if (useSingleOverlay) showProcessingOverlay();
   try {
     if (state.mode === 'batch') {
       // Oculta panel single si quedaba de una corrida previa
@@ -2006,8 +2215,15 @@ els.btnProcess.addEventListener('click', async () => {
       if (els.batchResult) els.batchResult.classList.remove('show');
       await processSingle();
     }
+    if (useSingleOverlay) hideProcessingOverlay();
   } catch (err) {
     console.error(err);
+    if (useSingleOverlay) {
+      clearInterval(procTimer);
+      clearInterval(particleInterval);
+      procOverlay.classList.add('fade-out');
+      setTimeout(() => { procOverlay.classList.remove('visible','fade-out'); document.body.style.overflow = ''; }, 400);
+    }
     showError(err);
   } finally {
     els.btnProcess.classList.remove('loading');

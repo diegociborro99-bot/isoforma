@@ -504,12 +504,12 @@
       );
     }
 
-    // Fase 16C: enforce indentation from reference style definitions
-    let indentStats = { touched: 0 };
+    // Fase 18: enforce ALL paragraph properties from reference style blueprint
+    let indentStats = { touched: 0, props: {} };
     if (Object.keys(refStyleBlueprint).length > 0) {
-      progress('Aplicando indentación del referente');
-      indentStats = await runStep('Enforce indentación por estilo', () =>
-        enforceRefStyleIndentation(docDoc, refStyleBlueprint)
+      progress('Aplicando propiedades del referente a párrafos');
+      indentStats = await runStep('Enforce propiedades de estilo', () =>
+        enforceRefStyleProperties(docDoc, refStyleBlueprint)
       );
     }
 
@@ -661,8 +661,14 @@
           },
           quality: {
             widowOrphan: qualityStats.widowOrphan,
+            keepNext: qualityStats.keepNext,
+            keepLines: qualityStats.keepLines,
+            pageBreakBefore: qualityStats.pageBreakBefore,
             postTableSpacing: qualityStats.postTableSpacing,
-            tableCentered: qualityStats.tableCentered
+            preTableSpacing: qualityStats.preTableSpacing,
+            tableCentered: qualityStats.tableCentered,
+            tableCellMargin: qualityStats.tableCellMargin,
+            tableKeepTogether: qualityStats.tableKeepTogether
           }
         },
         // Fase 13: justification log — every paragraph classification decision
@@ -2158,6 +2164,9 @@
       if (w) defaults.pgSz.w = w;
       if (h) defaults.pgSz.h = h;
       if (code) defaults.pgSz.code = code;
+      // Fase 18: preserve page orientation (landscape)
+      const orient = pgSzEl.getAttributeNS(W_NS, 'orient') || pgSzEl.getAttribute('w:orient');
+      if (orient) defaults.pgSz.orient = orient;
     }
 
     // Extract pgMar
@@ -2182,6 +2191,10 @@
       const lp = docGridEl.getAttributeNS(W_NS, 'linePitch') || docGridEl.getAttribute('w:linePitch');
       if (lp) defaults.docGrid.linePitch = lp;
     }
+
+    // Fase 18: extract titlePg (different first page)
+    const titlePg = firstChildByName(sectPr, 'w:titlePg');
+    if (titlePg) defaults.titlePg = true;
 
     return defaults;
   }
@@ -2444,7 +2457,10 @@
   // ============================================================
 
   async function extractRefStyleProperties(refZip) {
-    const blueprint = {}; // { styleId: { pPrXml, rPrXml } }
+    const blueprint = {
+      _styles: {},        // { styleId: { pPrXml, rPrXml } }
+      _docDefaults: null  // { rPrXml, pPrXml } from docDefaults
+    };
 
     const stylesFile = refZip.file('word/styles.xml');
     if (!stylesFile) return blueprint;
@@ -2453,40 +2469,74 @@
     let doc;
     try { doc = new DOMParser().parseFromString(xml, 'application/xml'); } catch (e) { return blueprint; }
 
+    // Extract docDefaults — the reference's base font/size/spacing
+    const docDefaults = doc.getElementsByTagName('w:docDefaults');
+    if (docDefaults.length > 0) {
+      const dd = docDefaults[0];
+      const rPrDefault = dd.getElementsByTagName('w:rPrDefault');
+      const pPrDefault = dd.getElementsByTagName('w:pPrDefault');
+      blueprint._docDefaults = {
+        rPrXml: rPrDefault.length > 0 ? (function() {
+          const rPr = firstChildByName(rPrDefault[0], 'w:rPr');
+          return rPr ? new XMLSerializer().serializeToString(rPr) : null;
+        })() : null,
+        pPrXml: pPrDefault.length > 0 ? (function() {
+          const pPr = firstChildByName(pPrDefault[0], 'w:pPr');
+          return pPr ? new XMLSerializer().serializeToString(pPr) : null;
+        })() : null
+      };
+    }
+
+    // Extract per-style properties (paragraph + character styles)
     const styles = doc.getElementsByTagName('w:style');
     for (let i = 0; i < styles.length; i++) {
       const style = styles[i];
       const type = style.getAttribute('w:type');
-      if (type !== 'paragraph') continue;
+      if (type !== 'paragraph' && type !== 'character') continue;
       const id = style.getAttributeNS(W_NS, 'styleId') || style.getAttribute('w:styleId');
       if (!id) continue;
 
       const pPr = firstChildByName(style, 'w:pPr');
       const rPr = firstChildByName(style, 'w:rPr');
 
-      blueprint[id] = {
+      blueprint._styles[id] = {
+        type: type,
         pPrXml: pPr ? new XMLSerializer().serializeToString(pPr) : null,
         rPrXml: rPr ? new XMLSerializer().serializeToString(rPr) : null
       };
+    }
+
+    // Legacy compat: also expose styles on root object for existing code
+    for (const [id, spec] of Object.entries(blueprint._styles)) {
+      if (spec.type === 'paragraph') blueprint[id] = spec;
     }
 
     return blueprint;
   }
 
   /**
-   * Fase 16 · C: Enforce paragraph properties from reference style blueprint.
-   * For each paragraph in the content that has been assigned an FHJ style,
-   * look up that style's pPr in the blueprint and enforce:
-   *   - Indentation (w:ind) if defined in reference style
-   *   - Alignment (w:jc) if defined in reference style (unless user chose justify)
-   * This ensures the output matches the reference's visual appearance at 100%.
+   * Fase 18: Enforce FULL paragraph properties from reference style blueprint.
+   * For each paragraph in the content that has a known style, applies ALL
+   * pPr properties from the reference definition that are not already
+   * explicitly set on the paragraph:
+   *   - w:ind  (indentation: left, right, firstLine, hanging)
+   *   - w:jc   (alignment: left, center, right, both)
+   *   - w:pBdr (paragraph borders)
+   *   - w:shd  (paragraph shading/background)
+   *   - w:tabs (tab stops)
+   * This ensures the output matches the reference at 100% even for
+   * properties that are defined in the style but not inherited because
+   * the content document didn't have that style definition originally.
    */
-  function enforceRefStyleIndentation(doc, blueprint) {
-    const stats = { touched: 0 };
+  function enforceRefStyleProperties(doc, blueprint) {
+    const stats = { touched: 0, props: { ind: 0, jc: 0, pBdr: 0, shd: 0, tabs: 0 } };
     if (!blueprint || Object.keys(blueprint).length === 0) return stats;
 
     const body = doc.getElementsByTagName('w:body')[0];
     if (!body) return stats;
+
+    // Properties to enforce from blueprint (in OOXML element order)
+    const ENFORCEABLE_PROPS = ['w:ind', 'w:jc', 'w:pBdr', 'w:shd', 'w:tabs'];
 
     const paragraphs = Array.from(body.getElementsByTagName('w:p'));
     for (const p of paragraphs) {
@@ -2496,42 +2546,34 @@
       const spec = blueprint[styleId];
       if (!spec.pPrXml) continue;
 
-      // Parse the style's pPr to extract ind
       let stylePPr;
       try {
-        stylePPr = new DOMParser().parseFromString(spec.pPrXml, 'application/xml').documentElement;
+        stylePPr = parseOoxmlFragment(spec.pPrXml);
       } catch (e) { continue; }
 
-      const styleInd = firstChildByName(stylePPr, 'w:ind');
-      if (!styleInd) continue;
-
-      // Get or create pPr on the paragraph
       let pPr = firstChildByName(p, 'w:pPr');
-      if (!pPr) {
-        pPr = doc.createElementNS(W_NS, 'w:pPr');
-        p.insertBefore(pPr, p.firstChild);
+      let anyAdded = false;
+
+      for (const propName of ENFORCEABLE_PROPS) {
+        const styleProp = firstChildByName(stylePPr, propName);
+        if (!styleProp) continue; // Blueprint doesn't define this property
+
+        if (!pPr) {
+          pPr = doc.createElementNS(W_NS, 'w:pPr');
+          p.insertBefore(pPr, p.firstChild);
+        }
+
+        // Only set if not already explicitly present on this paragraph
+        if (!firstChildByName(pPr, propName)) {
+          const imported = doc.importNode(styleProp, true);
+          pPr.appendChild(imported);
+          anyAdded = true;
+          const shortName = propName.replace('w:', '');
+          if (stats.props[shortName] !== undefined) stats.props[shortName]++;
+        }
       }
 
-      // Only set indentation if not already explicitly set
-      let ind = firstChildByName(pPr, 'w:ind');
-      if (!ind) {
-        ind = doc.importNode(styleInd, true);
-        // Insert after spacing if exists, else after pStyle
-        const spacing = firstChildByName(pPr, 'w:spacing');
-        const pStyle = firstChildByName(pPr, 'w:pStyle');
-        if (spacing && spacing.nextSibling) {
-          pPr.insertBefore(ind, spacing.nextSibling);
-        } else if (spacing) {
-          pPr.appendChild(ind);
-        } else if (pStyle && pStyle.nextSibling) {
-          pPr.insertBefore(ind, pStyle.nextSibling);
-        } else if (pStyle) {
-          pPr.appendChild(ind);
-        } else {
-          pPr.insertBefore(ind, pPr.firstChild);
-        }
-        stats.touched++;
-      }
+      if (anyAdded) stats.touched++;
     }
 
     return stats;
@@ -2624,6 +2666,7 @@
     pgSz.setAttribute('w:w', layout.pgSz.w);
     pgSz.setAttribute('w:h', layout.pgSz.h);
     if (layout.pgSz.code) pgSz.setAttribute('w:code', layout.pgSz.code);
+    if (layout.pgSz.orient) pgSz.setAttribute('w:orient', layout.pgSz.orient);
     sectPr.appendChild(pgSz);
 
     const pgMar = doc.createElementNS(W_NS, 'w:pgMar');
@@ -2639,6 +2682,11 @@
     const docGrid = doc.createElementNS(W_NS, 'w:docGrid');
     docGrid.setAttribute('w:linePitch', layout.docGrid.linePitch);
     sectPr.appendChild(docGrid);
+
+    // Fase 18: titlePg (different first page headers/footers)
+    if (layout.titlePg) {
+      sectPr.appendChild(doc.createElementNS(W_NS, 'w:titlePg'));
+    }
   }
 
   function renumberBookmarksDom(doc) {
@@ -3192,42 +3240,111 @@
   // for all tables (including those without a reference style).
   // ============================================================
   function enforceDocumentQuality(doc) {
-    const stats = { widowOrphan: 0, postTableSpacing: 0, tableCentered: 0 };
+    const stats = {
+      widowOrphan: 0, keepNext: 0, keepLines: 0, pageBreakBefore: 0,
+      postTableSpacing: 0, preTableSpacing: 0, tableCentered: 0,
+      tableCellMargin: 0, tableKeepTogether: 0
+    };
     const body = doc.getElementsByTagName('w:body')[0];
     if (!body) return stats;
 
-    // --- A) Widow/orphan control on ALL paragraphs ---
+    // Collect table paragraphs to skip some rules inside cells
+    const tableParas = new Set();
+    const allTablesInner = body.getElementsByTagName('w:tbl');
+    for (let i = 0; i < allTablesInner.length; i++) {
+      const paras = allTablesInner[i].getElementsByTagName('w:p');
+      for (let j = 0; j < paras.length; j++) tableParas.add(paras[j]);
+    }
+
+    // Title styles that need keepNext + pageBreakBefore
+    const TITLE_STYLES = new Set(['FHJTtulo1', 'Heading1', 'Heading 1', 'Título1', 'Titulo1']);
+    // Subtitle styles that need keepNext
+    const SUBTITLE_STYLES = new Set([
+      'FHJTtuloprrafo', 'Heading2', 'Heading 2', 'Heading3', 'Heading 3',
+      'Heading4', 'Heading 4', 'Título2', 'Título3', 'Titulo2', 'Titulo3'
+    ]);
+
+    // --- A) Paragraph-level quality ---
     const paragraphs = Array.from(body.getElementsByTagName('w:p'));
-    for (const p of paragraphs) {
+    for (let idx = 0; idx < paragraphs.length; idx++) {
+      const p = paragraphs[idx];
+      const isInTable = tableParas.has(p);
+
       let pPr = firstChildByName(p, 'w:pPr');
       if (!pPr) {
         pPr = doc.createElementNS(W_NS, 'w:pPr');
         p.insertBefore(pPr, p.firstChild);
       }
-      // Set widowControl ON (prevents orphan lines at page breaks)
+
+      // A1) widowControl ON on all paragraphs
       let wc = firstChildByName(pPr, 'w:widowControl');
       if (wc) {
-        // If it was explicitly disabled, remove and re-add as enabled
         const val = wc.getAttributeNS(W_NS, 'val') || wc.getAttribute('w:val');
-        if (val === '0' || val === 'false') {
-          pPr.removeChild(wc);
-          wc = null;
-        }
+        if (val === '0' || val === 'false') { pPr.removeChild(wc); wc = null; }
       }
       if (!wc) {
         wc = doc.createElementNS(W_NS, 'w:widowControl');
-        // No w:val attribute = ON by default in OOXML spec
         pPr.insertBefore(wc, pPr.firstChild);
         stats.widowOrphan++;
       }
+
+      // Skip keepNext/keepLines/pageBreak for paragraphs inside tables
+      if (isInTable) continue;
+
+      const styleId = getExistingPStyle(p) || '';
+      const isTitle = TITLE_STYLES.has(styleId);
+      const isSubtitle = SUBTITLE_STYLES.has(styleId);
+      const isHeading = isTitle || isSubtitle;
+
+      // A2) keepNext: titles and subtitles MUST stay with the next paragraph
+      if (isHeading && !firstChildByName(pPr, 'w:keepNext')) {
+        pPr.appendChild(doc.createElementNS(W_NS, 'w:keepNext'));
+        stats.keepNext++;
+      }
+
+      // A3) keepLines: headings should not split across pages
+      if (isHeading && !firstChildByName(pPr, 'w:keepLines')) {
+        pPr.appendChild(doc.createElementNS(W_NS, 'w:keepLines'));
+        stats.keepLines++;
+      }
+
+      // A4) pageBreakBefore: major titles (level 1) start on new page
+      //     EXCEPT the very first title in the document (don't waste a blank page)
+      if (isTitle && idx > 0 && !firstChildByName(pPr, 'w:pageBreakBefore')) {
+        // Check there's actually content before this title (not just empty paragraphs)
+        let hasContentBefore = false;
+        for (let k = idx - 1; k >= 0; k--) {
+          const prevText = getParagraphTextDom(paragraphs[k]);
+          if (prevText && prevText.trim()) { hasContentBefore = true; break; }
+          if (paragraphs[k].previousSibling && paragraphs[k].previousSibling.nodeName === 'w:tbl') { hasContentBefore = true; break; }
+        }
+        if (hasContentBefore) {
+          pPr.appendChild(doc.createElementNS(W_NS, 'w:pageBreakBefore'));
+          stats.pageBreakBefore++;
+        }
+      }
     }
 
-    // --- B) Post-table spacing: ensure paragraph after each table has spacing ---
+    // --- B) Table quality ---
     const allTables = Array.from(body.getElementsByTagName('w:tbl'));
     const bodyTables = allTables.filter(t => !isInsideName(t, 'w:tbl', true));
+
     for (const tbl of bodyTables) {
+      // B1) Pre-table spacing (paragraph BEFORE table should have after-spacing)
+      const prevSibling = tbl.previousSibling;
+      if (prevSibling && prevSibling.nodeName === 'w:p') {
+        let pPr = firstChildByName(prevSibling, 'w:pPr');
+        if (pPr) {
+          let sp = firstChildByName(pPr, 'w:spacing');
+          if (sp) {
+            const after = parseInt(sp.getAttributeNS(W_NS, 'after') || sp.getAttribute('w:after') || '0', 10);
+            if (after < 120) { sp.setAttribute('w:after', '200'); stats.preTableSpacing++; }
+          }
+        }
+      }
+
+      // B2) Post-table spacing
       const nextSibling = tbl.nextSibling;
-      // If next element is a paragraph, ensure it has before-spacing
       if (nextSibling && nextSibling.nodeName === 'w:p') {
         let pPr = firstChildByName(nextSibling, 'w:pPr');
         if (!pPr) {
@@ -3237,22 +3354,17 @@
         let sp = firstChildByName(pPr, 'w:spacing');
         if (!sp) {
           sp = doc.createElementNS(W_NS, 'w:spacing');
-          sp.setAttribute('w:before', '240'); // 12pt spacing before
+          sp.setAttribute('w:before', '240');
           const pStyle = firstChildByName(pPr, 'w:pStyle');
           if (pStyle && pStyle.nextSibling) pPr.insertBefore(sp, pStyle.nextSibling);
           else if (pStyle) pPr.appendChild(sp);
           else pPr.appendChild(sp);
           stats.postTableSpacing++;
         } else {
-          // Ensure minimum before spacing of 120 (6pt)
           const before = parseInt(sp.getAttributeNS(W_NS, 'before') || sp.getAttribute('w:before') || '0', 10);
-          if (before < 120) {
-            sp.setAttribute('w:before', '240');
-            stats.postTableSpacing++;
-          }
+          if (before < 120) { sp.setAttribute('w:before', '240'); stats.postTableSpacing++; }
         }
       } else if (!nextSibling || nextSibling.nodeName !== 'w:p') {
-        // No paragraph after table — insert an empty spacer paragraph
         const spacerP = doc.createElementNS(W_NS, 'w:p');
         const spacerPPr = doc.createElementNS(W_NS, 'w:pPr');
         const spacerSp = doc.createElementNS(W_NS, 'w:spacing');
@@ -3266,7 +3378,7 @@
         stats.postTableSpacing++;
       }
 
-      // --- C) Ensure ALL tables are centered (even without ref style) ---
+      // B3) Table centering
       let tblPr = firstChildByName(tbl, 'w:tblPr');
       if (!tblPr) {
         tblPr = doc.createElementNS(W_NS, 'w:tblPr');
@@ -3277,6 +3389,54 @@
         jc.setAttribute('w:val', 'center');
         tblPr.appendChild(jc);
         stats.tableCentered++;
+      }
+
+      // B4) Default cell margins for clean look (if no tblCellMar defined)
+      if (!firstChildByName(tblPr, 'w:tblCellMar')) {
+        const cellMar = doc.createElementNS(W_NS, 'w:tblCellMar');
+        for (const [side, val] of [['top', '40'], ['left', '80'], ['bottom', '40'], ['right', '80']]) {
+          const el = doc.createElementNS(W_NS, 'w:' + side);
+          el.setAttribute('w:w', val);
+          el.setAttribute('w:type', 'dxa');
+          cellMar.appendChild(el);
+        }
+        tblPr.appendChild(cellMar);
+        stats.tableCellMargin++;
+      }
+
+      // B5) Row-level quality: cantSplit + tblHeader + uniform cell vAlign
+      const rows = Array.from(tbl.childNodes).filter(n => n.nodeName === 'w:tr');
+      for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+        const row = rows[rIdx];
+        let trPr = firstChildByName(row, 'w:trPr');
+        if (!trPr) {
+          trPr = doc.createElementNS(W_NS, 'w:trPr');
+          row.insertBefore(trPr, row.firstChild);
+        }
+        // Keep row together (don't split across pages)
+        if (!firstChildByName(trPr, 'w:cantSplit')) {
+          trPr.appendChild(doc.createElementNS(W_NS, 'w:cantSplit'));
+        }
+        // First row repeats as header on continuation pages
+        if (rIdx === 0 && !firstChildByName(trPr, 'w:tblHeader')) {
+          trPr.appendChild(doc.createElementNS(W_NS, 'w:tblHeader'));
+        }
+        stats.tableKeepTogether++;
+
+        // Uniform vAlign center on all cells
+        const cells = Array.from(row.childNodes).filter(n => n.nodeName === 'w:tc');
+        for (const tc of cells) {
+          let tcPr = firstChildByName(tc, 'w:tcPr');
+          if (!tcPr) {
+            tcPr = doc.createElementNS(W_NS, 'w:tcPr');
+            tc.insertBefore(tcPr, tc.firstChild);
+          }
+          if (!firstChildByName(tcPr, 'w:vAlign')) {
+            const vAlign = doc.createElementNS(W_NS, 'w:vAlign');
+            vAlign.setAttribute('w:val', 'center');
+            tcPr.appendChild(vAlign);
+          }
+        }
       }
     }
 
