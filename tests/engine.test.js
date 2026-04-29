@@ -97,7 +97,7 @@ describe('Isoforma engine — caso B (contenido SIN cabecera FHJ)', () => {
     expect(header2Text).toContain('Procedimiento de prueba sintético');
   });
 
-  it('no personaliza el header2 cuando los metadatos están incompletos', async () => {
+  it('personaliza parcialmente el header2 con metadatos incompletos (solo código)', async () => {
     const refFile = await buildReferentDocx();
     const contentFile = await buildContentDocx({ withFhjHeader: false });
 
@@ -105,7 +105,8 @@ describe('Isoforma engine — caso B (contenido SIN cabecera FHJ)', () => {
     const { blob } = await runEngine({ refFile, contentFile, metadata });
     const { files } = await unpackDocx(blob);
 
-    expect(files['word/header2.xml']).toContain('[CODIGO / VERSION]');
+    // Fase 17: partial metadata — code is written, title placeholder preserved
+    expect(files['word/header2.xml']).toContain('P.01.00.001');
     expect(files['word/header2.xml']).toContain('[TITULO DEL PROCEDIMIENTO]');
   });
 

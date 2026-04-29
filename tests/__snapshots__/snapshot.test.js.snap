@@ -170,6 +170,11 @@ exports[`snapshot — document.xml post-procesado > produce una huella determini
         "numFmtsRewritten": 0,
         "paragraphs": 0,
       },
+      "quality": {
+        "postTableSpacing": 1,
+        "tableCentered": 1,
+        "widowOrphan": 14,
+      },
       "semantic": {
         "applied": true,
         "boldAlerts": 0,

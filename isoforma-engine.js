@@ -472,6 +472,12 @@
       );
     }
 
+    // Fase 17: Document quality enforcement (widow/orphan, post-table spacing, table centering)
+    progress('Mejorando calidad del documento');
+    const qualityStats = await runStep('Calidad de documento', () =>
+      enforceDocumentQuality(docDoc)
+    );
+
     // Fase 12 · B4 — Tabulación de listas §4.2.4.3 a nivel de párrafo.
     // (Los símbolos de viñeta §4.2.4.2 y el indent del numbering.xml se
     // normalizan más tarde, tras el merge de numbering.)
@@ -562,6 +568,31 @@
 
     outputZip.file('word/document.xml', new XMLSerializer().serializeToString(docDoc));
 
+    // Fase 17: Limpiar docProps para eliminar título/autor del documento origen.
+    // Esto evita que el nombre del archivo de contenido aparezca en el documento final.
+    progress('Limpiando metadatos del documento');
+    await runStep('Limpiando docProps', async () => {
+      // Copy docProps from reference if they exist (inherits ref's metadata)
+      for (const path of ['docProps/core.xml', 'docProps/app.xml']) {
+        const refFile = refZip.file(path);
+        if (refFile) {
+          outputZip.file(path, await refFile.async('uint8array'));
+        } else {
+          // If reference doesn't have it, sanitize the content's version
+          const contentFile = outputZip.file(path);
+          if (contentFile && path === 'docProps/core.xml') {
+            const xml = await contentFile.async('string');
+            // Clear dc:title, dc:subject, dc:description, cp:lastModifiedBy
+            let cleaned = xml
+              .replace(/<dc:title>[^<]*<\/dc:title>/g, '<dc:title></dc:title>')
+              .replace(/<dc:subject>[^<]*<\/dc:subject>/g, '<dc:subject></dc:subject>')
+              .replace(/<dc:description>[^<]*<\/dc:description>/g, '<dc:description></dc:description>');
+            outputZip.file(path, cleaned);
+          }
+        }
+      }
+    });
+
     progress('Registrando tipos de contenido');
     await runStep('Actualizando [Content_Types].xml', async () => {
       let contentTypes = await outputZip.file('[Content_Types].xml').async('string');
@@ -627,6 +658,11 @@
           indentation: {
             applied: Object.keys(refStyleBlueprint).length > 0,
             touched: indentStats.touched
+          },
+          quality: {
+            widowOrphan: qualityStats.widowOrphan,
+            postTableSpacing: qualityStats.postTableSpacing,
+            tableCentered: qualityStats.tableCentered
           }
         },
         // Fase 13: justification log — every paragraph classification decision
@@ -637,7 +673,8 @@
   }
 
   function hasMetadata(m) {
-    return m && (m.code || '').trim() && (m.version || '').trim() && (m.title || '').trim();
+    // Fase 17: any non-empty field triggers metadata customization
+    return m && ((m.code || '').trim() || (m.version || '').trim() || (m.title || '').trim());
   }
 
   // Marcadores de texto que identifican un header como "del FHJ". Cualquier
@@ -1116,10 +1153,19 @@
         }
       };
     }
-    clearParagraphText(paragraphs[0]);
-    addTextToParagraph(doc, paragraphs[0], metadata.code + ' / ' + metadata.version, false);
-    clearParagraphText(paragraphs[1]);
-    addTextToParagraph(doc, paragraphs[1], metadata.title, true);
+    // Fase 17: only write non-empty fields; skip " / " separator if one is empty
+    const code = (metadata.code || '').trim();
+    const version = (metadata.version || '').trim();
+    const title = (metadata.title || '').trim();
+    const codeVersionText = [code, version].filter(Boolean).join(' / ');
+    if (codeVersionText) {
+      clearParagraphText(paragraphs[0]);
+      addTextToParagraph(doc, paragraphs[0], codeVersionText, false);
+    }
+    if (title) {
+      clearParagraphText(paragraphs[1]);
+      addTextToParagraph(doc, paragraphs[1], title, true);
+    }
     outputZip.file('word/header2.xml', new XMLSerializer().serializeToString(doc));
     return null;
   }
@@ -2247,6 +2293,21 @@
    * Aplica el estilo de tabla extraído del referente a todas las tablas del contenido.
    * Reemplaza tblPr completo y ajusta tcPr de cada celda según el template.
    */
+  /**
+   * Safely parse a serialized OOXML fragment that may lack namespace declarations.
+   * Wraps the fragment in a dummy element with xmlns:w declared so DOMParser
+   * can resolve element names correctly. Returns the first child element.
+   */
+  function parseOoxmlFragment(xmlFragment) {
+    const wrapped = '<_wrap xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
+                    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
+                    'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">' +
+                    xmlFragment + '</_wrap>';
+    const parsed = new DOMParser().parseFromString(wrapped, 'application/xml');
+    const wrapper = parsed.documentElement;
+    return wrapper.firstChild;
+  }
+
   function applyRefTableStyleDom(doc, refTableStyle) {
     const stats = { tablesStyled: 0, cellsStyled: 0 };
     if (!refTableStyle || !refTableStyle.found) return stats;
@@ -2261,22 +2322,58 @@
     for (let tIdx = 0; tIdx < bodyTables.length; tIdx++) {
       const tbl = bodyTables[tIdx];
 
-      // Replace tblPr with reference version
+      // Replace tblPr with reference version + ensure centering
       if (refTableStyle.tblPrXml) {
         const oldTblPr = firstChildByName(tbl, 'w:tblPr');
-        const newTblPr = new DOMParser().parseFromString(refTableStyle.tblPrXml, 'application/xml').documentElement;
+        const newTblPr = parseOoxmlFragment(refTableStyle.tblPrXml);
         const importedTblPr = doc.importNode(newTblPr, true);
+        // Fase 17: ensure table is centered
+        let tblJc = firstChildByName(importedTblPr, 'w:jc');
+        if (!tblJc) {
+          tblJc = doc.createElementNS(W_NS, 'w:jc');
+          tblJc.setAttribute('w:val', 'center');
+          importedTblPr.appendChild(tblJc);
+        }
         if (oldTblPr) {
           tbl.replaceChild(importedTblPr, oldTblPr);
         } else {
           tbl.insertBefore(importedTblPr, tbl.firstChild);
         }
+      } else {
+        // No ref table style: still ensure centering
+        let tblPr = firstChildByName(tbl, 'w:tblPr');
+        if (!tblPr) {
+          tblPr = doc.createElementNS(W_NS, 'w:tblPr');
+          tbl.insertBefore(tblPr, tbl.firstChild);
+        }
+        let tblJc = firstChildByName(tblPr, 'w:jc');
+        if (!tblJc) {
+          tblJc = doc.createElementNS(W_NS, 'w:jc');
+          tblJc.setAttribute('w:val', 'center');
+          tblPr.appendChild(tblJc);
+        }
       }
 
-      // Apply tcPr to cells
+      // Apply tcPr to cells + row properties
       const rows = Array.from(tbl.childNodes).filter(n => n.nodeName === 'w:tr');
       for (let rIdx = 0; rIdx < rows.length; rIdx++) {
         const row = rows[rIdx];
+
+        // Fase 17: set trPr — cantSplit + tblHeader for first row + uniform row height
+        let trPr = firstChildByName(row, 'w:trPr');
+        if (!trPr) {
+          trPr = doc.createElementNS(W_NS, 'w:trPr');
+          row.insertBefore(trPr, row.firstChild);
+        }
+        // Prevent row from splitting across pages
+        if (!firstChildByName(trPr, 'w:cantSplit')) {
+          trPr.appendChild(doc.createElementNS(W_NS, 'w:cantSplit'));
+        }
+        // First row repeats as header on each page
+        if (rIdx === 0 && !firstChildByName(trPr, 'w:tblHeader')) {
+          trPr.appendChild(doc.createElementNS(W_NS, 'w:tblHeader'));
+        }
+
         const cells = Array.from(row.childNodes).filter(n => n.nodeName === 'w:tc');
         const isHeader = rIdx === 0;
         const templateTcPrs = isHeader ? refTableStyle.firstRowTcPrs : refTableStyle.bodyRowTcPrs;
@@ -2294,17 +2391,22 @@
             if (tcW) preservedWidth = new XMLSerializer().serializeToString(tcW);
           }
 
-          // Parse template tcPr and import
-          const templateDoc = new DOMParser().parseFromString(templateXml, 'application/xml');
-          const newTcPr = doc.importNode(templateDoc.documentElement, true);
+          // Parse template tcPr with safe namespace parsing and import
+          const newTcPr = doc.importNode(parseOoxmlFragment(templateXml), true);
 
           // Restore width from content table if we had one
           if (preservedWidth) {
             const existingTcW = firstChildByName(newTcPr, 'w:tcW');
             if (existingTcW) newTcPr.removeChild(existingTcW);
-            const widthDoc = new DOMParser().parseFromString(preservedWidth, 'application/xml');
-            const widthNode = doc.importNode(widthDoc.documentElement, true);
+            const widthNode = doc.importNode(parseOoxmlFragment(preservedWidth), true);
             newTcPr.insertBefore(widthNode, newTcPr.firstChild);
+          }
+
+          // Fase 17: ensure vertical alignment center for uniform appearance
+          if (!firstChildByName(newTcPr, 'w:vAlign')) {
+            const vAlign = doc.createElementNS(W_NS, 'w:vAlign');
+            vAlign.setAttribute('w:val', 'center');
+            newTcPr.appendChild(vAlign);
           }
 
           if (oldTcPr) {
@@ -2321,8 +2423,7 @@
           for (let ri = 0; ri < headerRuns.length; ri++) {
             const r = headerRuns[ri];
             const oldRPr = firstChildByName(r, 'w:rPr');
-            const rPrDoc = new DOMParser().parseFromString(refTableStyle.headerRowRPr, 'application/xml');
-            const newRPr = doc.importNode(rPrDoc.documentElement, true);
+            const newRPr = doc.importNode(parseOoxmlFragment(refTableStyle.headerRowRPr), true);
             if (oldRPr) r.replaceChild(newRPr, oldRPr);
             else r.insertBefore(newRPr, r.firstChild);
           }
@@ -3080,6 +3181,103 @@
       }
 
       stats.justified++;
+    }
+
+    return stats;
+  }
+
+  // ============================================================
+  // Fase 17: Document quality enforcement
+  // Fixes widow/orphan, post-table spacing, and table centering
+  // for all tables (including those without a reference style).
+  // ============================================================
+  function enforceDocumentQuality(doc) {
+    const stats = { widowOrphan: 0, postTableSpacing: 0, tableCentered: 0 };
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return stats;
+
+    // --- A) Widow/orphan control on ALL paragraphs ---
+    const paragraphs = Array.from(body.getElementsByTagName('w:p'));
+    for (const p of paragraphs) {
+      let pPr = firstChildByName(p, 'w:pPr');
+      if (!pPr) {
+        pPr = doc.createElementNS(W_NS, 'w:pPr');
+        p.insertBefore(pPr, p.firstChild);
+      }
+      // Set widowControl ON (prevents orphan lines at page breaks)
+      let wc = firstChildByName(pPr, 'w:widowControl');
+      if (wc) {
+        // If it was explicitly disabled, remove and re-add as enabled
+        const val = wc.getAttributeNS(W_NS, 'val') || wc.getAttribute('w:val');
+        if (val === '0' || val === 'false') {
+          pPr.removeChild(wc);
+          wc = null;
+        }
+      }
+      if (!wc) {
+        wc = doc.createElementNS(W_NS, 'w:widowControl');
+        // No w:val attribute = ON by default in OOXML spec
+        pPr.insertBefore(wc, pPr.firstChild);
+        stats.widowOrphan++;
+      }
+    }
+
+    // --- B) Post-table spacing: ensure paragraph after each table has spacing ---
+    const allTables = Array.from(body.getElementsByTagName('w:tbl'));
+    const bodyTables = allTables.filter(t => !isInsideName(t, 'w:tbl', true));
+    for (const tbl of bodyTables) {
+      const nextSibling = tbl.nextSibling;
+      // If next element is a paragraph, ensure it has before-spacing
+      if (nextSibling && nextSibling.nodeName === 'w:p') {
+        let pPr = firstChildByName(nextSibling, 'w:pPr');
+        if (!pPr) {
+          pPr = doc.createElementNS(W_NS, 'w:pPr');
+          nextSibling.insertBefore(pPr, nextSibling.firstChild);
+        }
+        let sp = firstChildByName(pPr, 'w:spacing');
+        if (!sp) {
+          sp = doc.createElementNS(W_NS, 'w:spacing');
+          sp.setAttribute('w:before', '240'); // 12pt spacing before
+          const pStyle = firstChildByName(pPr, 'w:pStyle');
+          if (pStyle && pStyle.nextSibling) pPr.insertBefore(sp, pStyle.nextSibling);
+          else if (pStyle) pPr.appendChild(sp);
+          else pPr.appendChild(sp);
+          stats.postTableSpacing++;
+        } else {
+          // Ensure minimum before spacing of 120 (6pt)
+          const before = parseInt(sp.getAttributeNS(W_NS, 'before') || sp.getAttribute('w:before') || '0', 10);
+          if (before < 120) {
+            sp.setAttribute('w:before', '240');
+            stats.postTableSpacing++;
+          }
+        }
+      } else if (!nextSibling || nextSibling.nodeName !== 'w:p') {
+        // No paragraph after table — insert an empty spacer paragraph
+        const spacerP = doc.createElementNS(W_NS, 'w:p');
+        const spacerPPr = doc.createElementNS(W_NS, 'w:pPr');
+        const spacerSp = doc.createElementNS(W_NS, 'w:spacing');
+        spacerSp.setAttribute('w:before', '240');
+        spacerSp.setAttribute('w:after', '0');
+        spacerSp.setAttribute('w:line', '240');
+        spacerSp.setAttribute('w:lineRule', 'auto');
+        spacerPPr.appendChild(spacerSp);
+        spacerP.appendChild(spacerPPr);
+        tbl.parentNode.insertBefore(spacerP, tbl.nextSibling);
+        stats.postTableSpacing++;
+      }
+
+      // --- C) Ensure ALL tables are centered (even without ref style) ---
+      let tblPr = firstChildByName(tbl, 'w:tblPr');
+      if (!tblPr) {
+        tblPr = doc.createElementNS(W_NS, 'w:tblPr');
+        tbl.insertBefore(tblPr, tbl.firstChild);
+      }
+      if (!firstChildByName(tblPr, 'w:jc')) {
+        const jc = doc.createElementNS(W_NS, 'w:jc');
+        jc.setAttribute('w:val', 'center');
+        tblPr.appendChild(jc);
+        stats.tableCentered++;
+      }
     }
 
     return stats;
