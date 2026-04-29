@@ -566,7 +566,8 @@
     );
     if (pStyleWarning) warnings.push(pStyleWarning);
 
-    outputZip.file('word/document.xml', new XMLSerializer().serializeToString(docDoc));
+    const serializedDocXml = sanitizeSerializedXml(new XMLSerializer().serializeToString(docDoc));
+    outputZip.file('word/document.xml', serializedDocXml);
 
     // Fase 17: Limpiar docProps para eliminar título/autor del documento origen.
     // Esto evita que el nombre del archivo de contenido aparezca en el documento final.
@@ -836,7 +837,7 @@
     }
 
     return {
-      mergedXml: new XMLSerializer().serializeToString(refDoc),
+      mergedXml: sanitizeSerializedXml(new XMLSerializer().serializeToString(refDoc)),
       addedIds,
       conflictIds
     };
@@ -1015,7 +1016,7 @@
     }
 
     return {
-      mergedXml: new XMLSerializer().serializeToString(refDoc),
+      mergedXml: sanitizeSerializedXml(new XMLSerializer().serializeToString(refDoc)),
       numIdRemap,
       remappedAbstracts,
       remappedNums
@@ -1172,7 +1173,7 @@
       clearParagraphText(paragraphs[1]);
       addTextToParagraph(doc, paragraphs[1], title, true);
     }
-    outputZip.file('word/header2.xml', new XMLSerializer().serializeToString(doc));
+    outputZip.file('word/header2.xml', sanitizeSerializedXml(new XMLSerializer().serializeToString(doc)));
     return null;
   }
 
@@ -1234,7 +1235,7 @@
       root.appendChild(el);
       ids[rel.target.replace('.xml', '')] = id;
     }
-    outputZip.file('word/_rels/document.xml.rels', new XMLSerializer().serializeToString(doc));
+    outputZip.file('word/_rels/document.xml.rels', sanitizeSerializedXml(new XMLSerializer().serializeToString(doc)));
     return ids;
   }
 
@@ -2031,6 +2032,9 @@
       xmlString +
       '</w:wrap>';
     const fragDoc = new DOMParser().parseFromString(wrapped, 'application/xml');
+    // Guard: detect parse errors that would silently corrupt the output
+    const errNode = fragDoc.getElementsByTagName('parsererror')[0];
+    if (errNode) throw new Error('parseFragment: XML parse error — ' + (errNode.textContent || '').slice(0, 200));
     const children = [];
     for (let n = fragDoc.documentElement.firstChild; n; n = n.nextSibling) {
       children.push(n);
@@ -2069,6 +2073,59 @@
 
   function escapeXml(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /**
+   * Fase 19: Sanitize serialized XML to fix common XMLSerializer output issues.
+   *
+   * 1) Ensure the XML declaration is present and correct.
+   * 2) Remove duplicate namespace declarations on child elements that the
+   *    XMLSerializer may redundantly emit (safe because the root already declares them).
+   * 3) Fix any `xmlns:w=""` or `xmlns:r=""` empty namespace bindings that
+   *    some browsers produce when elements are created via createElementNS
+   *    but attributes are set with setAttribute (non-namespaced).
+   * 4) Ensure standalone="yes" to suppress DTD validation issues.
+   */
+  function sanitizeSerializedXml(xml) {
+    // 1) Ensure XML declaration
+    if (!xml.startsWith('<?xml')) {
+      xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' + xml;
+    }
+
+    // 2) Remove duplicate namespace declarations on non-root elements.
+    //    Keep the FIRST occurrence (on the root element), remove subsequent ones.
+    //    Pattern: xmlns:w="..." appearing on child elements.
+    const nsDecls = [
+      'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"',
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"',
+      'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"',
+      'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"',
+      'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"'
+    ];
+    for (const decl of nsDecls) {
+      const idx = xml.indexOf(decl);
+      if (idx === -1) continue;
+      // Find the next occurrence after the first one
+      let pos = xml.indexOf(decl, idx + decl.length);
+      while (pos !== -1) {
+        // Check this isn't at the very start of the root element
+        // Remove the duplicate (and any leading space)
+        const before = xml[pos - 1];
+        if (before === ' ' || before === '\n' || before === '\t') {
+          xml = xml.slice(0, pos - 1) + xml.slice(pos + decl.length);
+        } else {
+          xml = xml.slice(0, pos) + xml.slice(pos + decl.length);
+        }
+        pos = xml.indexOf(decl, pos);
+      }
+    }
+
+    // 3) Fix empty namespace bindings (xmlns:w="" or xmlns:r="")
+    xml = xml.replace(/ xmlns:w=""/g, '');
+    xml = xml.replace(/ xmlns:r=""/g, '');
+    xml = xml.replace(/ xmlns:mc=""/g, '');
+
+    return xml;
   }
 
   function addTableAndFigureTitlesDom(doc) {
@@ -2317,6 +2374,9 @@
                     'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">' +
                     xmlFragment + '</_wrap>';
     const parsed = new DOMParser().parseFromString(wrapped, 'application/xml');
+    // Guard: detect parse errors that would silently corrupt the output
+    const errNode = parsed.getElementsByTagName('parsererror')[0];
+    if (errNode) throw new Error('parseOoxmlFragment: XML parse error — ' + (errNode.textContent || '').slice(0, 200));
     const wrapper = parsed.documentElement;
     return wrapper.firstChild;
   }
@@ -2651,8 +2711,8 @@
 
     const ref = (tag, type, rid) => {
       const el = doc.createElementNS(W_NS, tag);
-      el.setAttribute('w:type', type);
-      el.setAttribute('r:id', rid);
+      el.setAttributeNS(W_NS, 'w:type', type);
+      el.setAttributeNS(R_NS, 'r:id', rid);
       sectPr.appendChild(el);
     };
     ref('w:headerReference', 'even', ids.header1);
@@ -2757,10 +2817,18 @@
     ];
     for (const [ext, mime] of imageDefaults) {
       if (!contentTypes.includes(`Extension="${ext}"`)) {
-        contentTypes = contentTypes.replace(
-          /<Default\s+Extension="xml"/,
-          `<Default Extension="${ext}" ContentType="${mime}"/>\n  <Default Extension="xml"`
+        // Robust: try to insert before any existing <Default> tag, or before </Types>
+        const inserted = contentTypes.replace(
+          /<Default[^>]*Extension="xml"[^>]*/,
+          `<Default Extension="${ext}" ContentType="${mime}"/>\n  $&`
         );
+        if (inserted !== contentTypes) {
+          contentTypes = inserted;
+        } else {
+          // Fallback: attribute order might be reversed or tag format differs
+          contentTypes = contentTypes.replace('</Types>',
+            `  <Default Extension="${ext}" ContentType="${mime}"/>\n</Types>`);
+        }
       }
     }
     if (!preservedHeaders) {
@@ -3825,7 +3893,7 @@
       }
     }
 
-    outputZip.file('word/numbering.xml', new XMLSerializer().serializeToString(doc));
+    outputZip.file('word/numbering.xml', sanitizeSerializedXml(new XMLSerializer().serializeToString(doc)));
     return stats;
   }
 
