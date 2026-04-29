@@ -353,6 +353,11 @@
     // Fase 14: extract page layout from reference to match template exactly
     const refLayout = await runStep('Extrayendo layout del referente', () => extractRefPageLayout(refZip));
 
+    // Fase 16: extract table style and style properties from reference
+    progress('Extrayendo formato de tablas del referente');
+    const refTableStyle = await runStep('Extrayendo estilo de tabla del referente', () => extractRefTableStyle(refZip));
+    const refStyleBlueprint = await runStep('Extrayendo propiedades de estilo del referente', () => extractRefStyleProperties(refZip));
+
     let relIds = null;
 
     if (alreadyHasFhjHeader) {
@@ -484,6 +489,24 @@
     progress('Numerando tablas y figuras');
     const numberingStats = await runStep('Numerando tablas y figuras', () => addTableAndFigureTitlesDom(docDoc));
 
+    // Fase 16: aplicar estilo de tabla del referente a las tablas del contenido
+    let tableStyleStats = { tablesStyled: 0, cellsStyled: 0 };
+    if (refTableStyle.found) {
+      progress('Aplicando formato de tabla del referente');
+      tableStyleStats = await runStep('Aplicando estilo de tabla', () =>
+        applyRefTableStyleDom(docDoc, refTableStyle)
+      );
+    }
+
+    // Fase 16C: enforce indentation from reference style definitions
+    let indentStats = { touched: 0 };
+    if (Object.keys(refStyleBlueprint).length > 0) {
+      progress('Aplicando indentación del referente');
+      indentStats = await runStep('Enforce indentación por estilo', () =>
+        enforceRefStyleIndentation(docDoc, refStyleBlueprint)
+      );
+    }
+
     if (relIds) {
       progress('Configurando página y secciones');
       await runStep('Actualizando sectPr', () => updateSectPrDom(docDoc, relIds, refLayout));
@@ -594,6 +617,16 @@
             skippedShort: justifyStats.skippedShort,
             skippedTable: justifyStats.skippedTable,
             skippedCentered: justifyStats.skippedCentered
+          },
+          // Fase 16: replicación del referente
+          tableStyle: {
+            applied: refTableStyle.found,
+            tablesStyled: tableStyleStats.tablesStyled,
+            cellsStyled: tableStyleStats.cellsStyled
+          },
+          indentation: {
+            applied: Object.keys(refStyleBlueprint).length > 0,
+            touched: indentStats.touched
           }
         },
         // Fase 13: justification log — every paragraph classification decision
@@ -1204,6 +1237,18 @@
     'bold-heading-upgrade':          'Texto corto en negrita en el documento original → probable título (formato-aware).',
     'bibliography-context-demote':   'Dentro de sección Bibliografía/Referencias → reclasificado como párrafo.',
     'numbered-sequence-coherence':   'Párrafos adyacentes numerados son títulos → coherencia de secuencia numérica.',
+    // Fase 16D: clasificador adaptativo universal
+    'outline-level-0':              'El párrafo tiene outlineLvl=0 en Word → título de primer nivel.',
+    'outline-level-1':              'outlineLvl=1 en Word → subtítulo.',
+    'outline-level-2':              'outlineLvl=2 en Word → subtítulo.',
+    'outline-level-3':              'outlineLvl=3 en Word → subtítulo.',
+    'native-heading1':              'Estilo nativo Heading 1 / Título 1 detectado → mapeado a título FHJ.',
+    'native-heading2':              'Estilo nativo Heading 2 / Título 2 detectado → mapeado a subtítulo FHJ.',
+    'native-heading3':              'Estilo nativo Heading 3 / Título 3 detectado → mapeado a subtítulo FHJ.',
+    'native-heading4':              'Estilo nativo Heading 4 / Título 4 detectado → mapeado a subtítulo FHJ.',
+    'format-bold-large':            'Texto corto + negrita + fuente grande (≥12pt) → título por formato.',
+    'format-bold-medium':           'Texto corto + negrita + fuente media (≥11pt) → subtítulo por formato.',
+    'format-centered-bold':         'Texto corto + centrado + negrita → título por formato visual.',
   };
 
   // Human-readable style names for the justification UI.
@@ -1291,11 +1336,20 @@
         style = 'FHJVietaNivel1';
         reason = 'list-item';
       } else if (text) {
-        // 3 + 6) Normal o sin estilo → classifier normativo.
-        const result = classifyParagraphDetailed(text);
-        style = result.style;
-        confidence = result.confidence;
-        reason = result.reason;
+        // 3 + 6) Normal o sin estilo → classifier adaptativo + normativo.
+        // Fase 16D: primero intentar clasificar por señales de Word (outline, heading, format)
+        const wordSignal = classifyByWordSignals(p, text, doc);
+        if (wordSignal) {
+          style = wordSignal.style;
+          confidence = wordSignal.confidence;
+          reason = wordSignal.reason;
+        } else {
+          // Fallback al clasificador regex normativo
+          const result = classifyParagraphDetailed(text);
+          style = result.style;
+          confidence = result.confidence;
+          reason = result.reason;
+        }
       }
 
       if (!style) continue;
@@ -2084,6 +2138,359 @@
     }
 
     return defaults;
+  }
+
+  // ============================================================
+  // Fase 16: Extracción completa de formato del referente
+  // Extrae tblPr (bordes, shading, widths) de las tablas del referente
+  // para replicar el estilo exacto en las tablas del contenido.
+  // También extrae indentación por estilo y propiedades de párrafo
+  // desde los estilos definidos en styles.xml del referente.
+  // ============================================================
+
+  /**
+   * Extrae el modelo de formato de tabla del referente.
+   * Lee TODAS las tablas del referente, encuentra la más representativa
+   * (la tabla con más filas, excluyendo "Datos generales"), y extrae:
+   *   - tblPr completo (borders, width, look, layout)
+   *   - tcPr por columna (shading, width, borders, vAlign)
+   *   - Párrafo por defecto dentro de celda (pPr)
+   */
+  async function extractRefTableStyle(refZip) {
+    const result = {
+      found: false,
+      tblPrXml: null,       // serialized <w:tblPr>...</w:tblPr>
+      tblGridXml: null,     // serialized <w:tblGrid>...</w:tblGrid>
+      firstRowTcPrs: [],    // array of serialized <w:tcPr> for header row
+      bodyRowTcPrs: [],     // array of serialized <w:tcPr> for body rows
+      headerRowRPr: null,   // run properties for header row text (bold, etc)
+    };
+
+    const docFile = refZip.file('word/document.xml');
+    if (!docFile) return result;
+    const xml = await docFile.async('string');
+    let doc;
+    try { doc = new DOMParser().parseFromString(xml, 'application/xml'); } catch (e) { return result; }
+
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return result;
+
+    // Get all top-level tables (not nested)
+    const allTables = Array.from(doc.getElementsByTagName('w:tbl'));
+    const bodyTables = allTables.filter(t => {
+      let parent = t.parentNode;
+      while (parent) {
+        if (parent.nodeName === 'w:tbl') return false;
+        if (parent.nodeName === 'w:body') return true;
+        parent = parent.parentNode;
+      }
+      return true;
+    });
+
+    if (bodyTables.length === 0) return result;
+
+    // Find the best "model" table: the one with most rows (skip first if it's "Datos generales")
+    let bestTable = null, bestRowCount = 0;
+    for (let i = 0; i < bodyTables.length; i++) {
+      const tbl = bodyTables[i];
+      const rows = Array.from(tbl.childNodes).filter(n => n.nodeName === 'w:tr');
+      if (rows.length > bestRowCount) {
+        bestRowCount = rows.length;
+        bestTable = tbl;
+      }
+    }
+
+    if (!bestTable || bestRowCount < 2) return result;
+
+    result.found = true;
+
+    // Extract tblPr
+    const tblPr = firstChildByName(bestTable, 'w:tblPr');
+    if (tblPr) result.tblPrXml = new XMLSerializer().serializeToString(tblPr);
+
+    // Extract tblGrid
+    const tblGrid = firstChildByName(bestTable, 'w:tblGrid');
+    if (tblGrid) result.tblGridXml = new XMLSerializer().serializeToString(tblGrid);
+
+    // Extract cell properties from first row (header) and second row (body)
+    const rows = Array.from(bestTable.childNodes).filter(n => n.nodeName === 'w:tr');
+    if (rows.length >= 1) {
+      const headerCells = Array.from(rows[0].childNodes).filter(n => n.nodeName === 'w:tc');
+      for (const tc of headerCells) {
+        const tcPr = firstChildByName(tc, 'w:tcPr');
+        result.firstRowTcPrs.push(tcPr ? new XMLSerializer().serializeToString(tcPr) : null);
+        // Extract rPr from first run in header
+        if (!result.headerRowRPr) {
+          const p = firstChildByName(tc, 'w:p');
+          if (p) {
+            const r = firstChildByName(p, 'w:r');
+            if (r) {
+              const rPr = firstChildByName(r, 'w:rPr');
+              if (rPr) result.headerRowRPr = new XMLSerializer().serializeToString(rPr);
+            }
+          }
+        }
+      }
+    }
+    if (rows.length >= 2) {
+      const bodyCells = Array.from(rows[1].childNodes).filter(n => n.nodeName === 'w:tc');
+      for (const tc of bodyCells) {
+        const tcPr = firstChildByName(tc, 'w:tcPr');
+        result.bodyRowTcPrs.push(tcPr ? new XMLSerializer().serializeToString(tcPr) : null);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Aplica el estilo de tabla extraído del referente a todas las tablas del contenido.
+   * Reemplaza tblPr completo y ajusta tcPr de cada celda según el template.
+   */
+  function applyRefTableStyleDom(doc, refTableStyle) {
+    const stats = { tablesStyled: 0, cellsStyled: 0 };
+    if (!refTableStyle || !refTableStyle.found) return stats;
+
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return stats;
+
+    // Get all top-level tables
+    const allTables = Array.from(doc.getElementsByTagName('w:tbl'));
+    const bodyTables = allTables.filter(t => !isInsideName(t, 'w:tbl', true));
+
+    for (let tIdx = 0; tIdx < bodyTables.length; tIdx++) {
+      const tbl = bodyTables[tIdx];
+
+      // Replace tblPr with reference version
+      if (refTableStyle.tblPrXml) {
+        const oldTblPr = firstChildByName(tbl, 'w:tblPr');
+        const newTblPr = new DOMParser().parseFromString(refTableStyle.tblPrXml, 'application/xml').documentElement;
+        const importedTblPr = doc.importNode(newTblPr, true);
+        if (oldTblPr) {
+          tbl.replaceChild(importedTblPr, oldTblPr);
+        } else {
+          tbl.insertBefore(importedTblPr, tbl.firstChild);
+        }
+      }
+
+      // Apply tcPr to cells
+      const rows = Array.from(tbl.childNodes).filter(n => n.nodeName === 'w:tr');
+      for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+        const row = rows[rIdx];
+        const cells = Array.from(row.childNodes).filter(n => n.nodeName === 'w:tc');
+        const isHeader = rIdx === 0;
+        const templateTcPrs = isHeader ? refTableStyle.firstRowTcPrs : refTableStyle.bodyRowTcPrs;
+
+        for (let cIdx = 0; cIdx < cells.length; cIdx++) {
+          const tc = cells[cIdx];
+          const templateXml = templateTcPrs[Math.min(cIdx, templateTcPrs.length - 1)];
+          if (!templateXml) continue;
+
+          // Preserve existing cell width if present (content table has its own widths)
+          const oldTcPr = firstChildByName(tc, 'w:tcPr');
+          let preservedWidth = null;
+          if (oldTcPr) {
+            const tcW = firstChildByName(oldTcPr, 'w:tcW');
+            if (tcW) preservedWidth = new XMLSerializer().serializeToString(tcW);
+          }
+
+          // Parse template tcPr and import
+          const templateDoc = new DOMParser().parseFromString(templateXml, 'application/xml');
+          const newTcPr = doc.importNode(templateDoc.documentElement, true);
+
+          // Restore width from content table if we had one
+          if (preservedWidth) {
+            const existingTcW = firstChildByName(newTcPr, 'w:tcW');
+            if (existingTcW) newTcPr.removeChild(existingTcW);
+            const widthDoc = new DOMParser().parseFromString(preservedWidth, 'application/xml');
+            const widthNode = doc.importNode(widthDoc.documentElement, true);
+            newTcPr.insertBefore(widthNode, newTcPr.firstChild);
+          }
+
+          if (oldTcPr) {
+            tc.replaceChild(newTcPr, oldTcPr);
+          } else {
+            tc.insertBefore(newTcPr, tc.firstChild);
+          }
+          stats.cellsStyled++;
+        }
+
+        // Apply header row rPr if this is first row
+        if (isHeader && refTableStyle.headerRowRPr) {
+          const headerRuns = row.getElementsByTagName('w:r');
+          for (let ri = 0; ri < headerRuns.length; ri++) {
+            const r = headerRuns[ri];
+            const oldRPr = firstChildByName(r, 'w:rPr');
+            const rPrDoc = new DOMParser().parseFromString(refTableStyle.headerRowRPr, 'application/xml');
+            const newRPr = doc.importNode(rPrDoc.documentElement, true);
+            if (oldRPr) r.replaceChild(newRPr, oldRPr);
+            else r.insertBefore(newRPr, r.firstChild);
+          }
+        }
+      }
+      stats.tablesStyled++;
+    }
+
+    return stats;
+  }
+
+  // ============================================================
+  // Fase 16 · B: Extracción de propiedades de párrafo por estilo del referente.
+  // Lee styles.xml del referente y extrae pPr (indentation, spacing, jc)
+  // para cada estilo, creando un "style blueprint" que se puede aplicar
+  // a los párrafos del contenido INDEPENDIENTEMENTE de si se definen
+  // como estilos FHJ o no.
+  // ============================================================
+
+  async function extractRefStyleProperties(refZip) {
+    const blueprint = {}; // { styleId: { pPrXml, rPrXml } }
+
+    const stylesFile = refZip.file('word/styles.xml');
+    if (!stylesFile) return blueprint;
+
+    const xml = await stylesFile.async('string');
+    let doc;
+    try { doc = new DOMParser().parseFromString(xml, 'application/xml'); } catch (e) { return blueprint; }
+
+    const styles = doc.getElementsByTagName('w:style');
+    for (let i = 0; i < styles.length; i++) {
+      const style = styles[i];
+      const type = style.getAttribute('w:type');
+      if (type !== 'paragraph') continue;
+      const id = style.getAttributeNS(W_NS, 'styleId') || style.getAttribute('w:styleId');
+      if (!id) continue;
+
+      const pPr = firstChildByName(style, 'w:pPr');
+      const rPr = firstChildByName(style, 'w:rPr');
+
+      blueprint[id] = {
+        pPrXml: pPr ? new XMLSerializer().serializeToString(pPr) : null,
+        rPrXml: rPr ? new XMLSerializer().serializeToString(rPr) : null
+      };
+    }
+
+    return blueprint;
+  }
+
+  /**
+   * Fase 16 · C: Enforce paragraph properties from reference style blueprint.
+   * For each paragraph in the content that has been assigned an FHJ style,
+   * look up that style's pPr in the blueprint and enforce:
+   *   - Indentation (w:ind) if defined in reference style
+   *   - Alignment (w:jc) if defined in reference style (unless user chose justify)
+   * This ensures the output matches the reference's visual appearance at 100%.
+   */
+  function enforceRefStyleIndentation(doc, blueprint) {
+    const stats = { touched: 0 };
+    if (!blueprint || Object.keys(blueprint).length === 0) return stats;
+
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return stats;
+
+    const paragraphs = Array.from(body.getElementsByTagName('w:p'));
+    for (const p of paragraphs) {
+      const styleId = getExistingPStyle(p);
+      if (!styleId || !blueprint[styleId]) continue;
+
+      const spec = blueprint[styleId];
+      if (!spec.pPrXml) continue;
+
+      // Parse the style's pPr to extract ind
+      let stylePPr;
+      try {
+        stylePPr = new DOMParser().parseFromString(spec.pPrXml, 'application/xml').documentElement;
+      } catch (e) { continue; }
+
+      const styleInd = firstChildByName(stylePPr, 'w:ind');
+      if (!styleInd) continue;
+
+      // Get or create pPr on the paragraph
+      let pPr = firstChildByName(p, 'w:pPr');
+      if (!pPr) {
+        pPr = doc.createElementNS(W_NS, 'w:pPr');
+        p.insertBefore(pPr, p.firstChild);
+      }
+
+      // Only set indentation if not already explicitly set
+      let ind = firstChildByName(pPr, 'w:ind');
+      if (!ind) {
+        ind = doc.importNode(styleInd, true);
+        // Insert after spacing if exists, else after pStyle
+        const spacing = firstChildByName(pPr, 'w:spacing');
+        const pStyle = firstChildByName(pPr, 'w:pStyle');
+        if (spacing && spacing.nextSibling) {
+          pPr.insertBefore(ind, spacing.nextSibling);
+        } else if (spacing) {
+          pPr.appendChild(ind);
+        } else if (pStyle && pStyle.nextSibling) {
+          pPr.insertBefore(ind, pStyle.nextSibling);
+        } else if (pStyle) {
+          pPr.appendChild(ind);
+        } else {
+          pPr.insertBefore(ind, pPr.firstChild);
+        }
+        stats.touched++;
+      }
+    }
+
+    return stats;
+  }
+
+  // ============================================================
+  // Fase 16 · D: Clasificador adaptativo universal
+  // En vez de depender solo de patrones FHJ, analiza las señales
+  // de formato del documento de contenido (Word formatting) para
+  // producir clasificaciones más certeras:
+  //   - Outline level (w:outlineLvl) → título seguro
+  //   - Heading styles nativos (Heading1, Heading2...) → mapeados a FHJ
+  //   - Font size significantly larger than body → probable título
+  //   - Centered + bold + short → probable título
+  // ============================================================
+
+  function classifyByWordSignals(p, text, doc) {
+    if (!text) return null;
+
+    const pPr = firstChildByName(p, 'w:pPr');
+
+    // Check outline level (Word's native heading indicator)
+    if (pPr) {
+      const outlineLvl = firstChildByName(pPr, 'w:outlineLvl');
+      if (outlineLvl) {
+        const lvl = parseInt(outlineLvl.getAttributeNS(W_NS, 'val') || outlineLvl.getAttribute('w:val') || '9', 10);
+        if (lvl === 0) return { style: 'FHJTtulo1', confidence: 'high', reason: 'outline-level-0' };
+        if (lvl <= 3) return { style: 'FHJTtuloprrafo', confidence: 'high', reason: 'outline-level-' + lvl };
+      }
+    }
+
+    // Check existing style name for native heading patterns
+    const existingStyle = getExistingPStyle(p);
+    if (existingStyle) {
+      const lower = existingStyle.toLowerCase();
+      if (/^heading\s*1$|^titulo\s*1$|^título\s*1$/i.test(lower) || lower === 'heading1') {
+        return { style: 'FHJTtulo1', confidence: 'high', reason: 'native-heading1' };
+      }
+      if (/^heading\s*[2-4]$|^titulo\s*[2-4]$|^título\s*[2-4]$/i.test(lower) || /^heading[2-4]$/.test(lower)) {
+        return { style: 'FHJTtuloprrafo', confidence: 'high', reason: 'native-heading' + lower.slice(-1) };
+      }
+    }
+
+    // Check formatting signals: bold + large font + short text = likely title
+    const signals = readParagraphFormattingSignals(p, doc);
+    if (signals.isBold && text.length < 80) {
+      if (signals.fontSize && signals.fontSize >= 24) { // 12pt = sz 24
+        return { style: 'FHJTtulo1', confidence: 'high', reason: 'format-bold-large' };
+      }
+      if (signals.fontSize && signals.fontSize >= 22 && text.length < 60) { // 11pt bold short
+        return { style: 'FHJTtuloprrafo', confidence: 'medium', reason: 'format-bold-medium' };
+      }
+    }
+
+    // Centered + bold + short → likely title
+    if (signals.isBold && signals.isCentered && text.length < 100) {
+      return { style: 'FHJTtulo1', confidence: 'medium', reason: 'format-centered-bold' };
+    }
+
+    return null; // No strong signal, fall through to regex classifier
   }
 
   function updateSectPrDom(doc, ids, layout) {

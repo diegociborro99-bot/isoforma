@@ -146,6 +146,10 @@ exports[`snapshot — document.xml post-procesado > produce una huella determini
     ],
     "list": 2,
     "normativa": {
+      "indentation": {
+        "applied": true,
+        "touched": 0,
+      },
       "justify": {
         "applied": false,
         "justified": 0,
@@ -181,6 +185,11 @@ exports[`snapshot — document.xml post-procesado > produce una huella determini
           "FHJVietaNivel1": 2,
         },
         "touched": 14,
+      },
+      "tableStyle": {
+        "applied": false,
+        "cellsStyled": 0,
+        "tablesStyled": 0,
       },
       "typography": {
         "applied": true,

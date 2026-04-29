@@ -1604,6 +1604,22 @@ function renderNormativa(nrm) {
           (nrm.justify.skippedShort > 0 ? ' · ' + nrm.justify.skippedShort + ' cortos omitidos' : '')
         : 'desactivado',
       on: !!(nrm.justify && nrm.justify.applied)
+    },
+    {
+      key: 'tableStyle',
+      label: 'Formato de tablas del referente',
+      detail: nrm.tableStyle && nrm.tableStyle.applied
+        ? nrm.tableStyle.tablesStyled + ' tabla' + (nrm.tableStyle.tablesStyled === 1 ? '' : 's') + ' · ' + nrm.tableStyle.cellsStyled + ' celdas formateadas'
+        : 'sin tabla modelo en referente',
+      on: !!(nrm.tableStyle && nrm.tableStyle.applied)
+    },
+    {
+      key: 'indentation',
+      label: 'Indentación del referente',
+      detail: nrm.indentation && nrm.indentation.applied
+        ? nrm.indentation.touched + ' párrafo' + (nrm.indentation.touched === 1 ? '' : 's') + ' con indentación del referente'
+        : 'sin blueprint de estilos',
+      on: !!(nrm.indentation && nrm.indentation.applied)
     }
   ];
 
