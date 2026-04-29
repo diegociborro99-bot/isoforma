@@ -35,11 +35,7 @@ html,body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif
 .grain{position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.95' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");opacity:.05;pointer-events:none;z-index:1;mix-blend-mode:multiply}
 
 /* Cursor */
-.cursor-dot{position:fixed;width:8px;height:8px;background:var(--accent);border-radius:50%;pointer-events:none;z-index:9999;transition:transform .15s ease-out,opacity .2s,width .25s,height .25s;transform:translate(-50%,-50%);mix-blend-mode:multiply}
-.cursor-ring{position:fixed;width:36px;height:36px;border:1px solid var(--accent);border-radius:50%;pointer-events:none;z-index:9998;transition:transform .3s var(--ease),width .3s,height .3s,opacity .3s;transform:translate(-50%,-50%);opacity:.5}
-body.hover-link .cursor-dot{width:0;height:0}
-body.hover-link .cursor-ring{width:56px;height:56px;opacity:1;background:rgba(31,61,43,.04)}
-@media(max-width:900px){.cursor-dot,.cursor-ring{display:none}}
+/* Cursor custom eliminado — Fase 18 */
 
 /* Navbar */
 .navbar{position:fixed;top:0;left:0;right:0;z-index:100;padding:20px 48px;display:flex;justify-content:space-between;align-items:center;transition:all .4s var(--ease);transform:translateY(-100%);animation:navbar-enter .8s var(--ease) .3s forwards}
@@ -563,7 +559,6 @@ input[type=file]{display:none}
 .login-foot{margin-top:22px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-mute);letter-spacing:.1em;text-transform:uppercase;text-align:center}
 body.gated{overflow:hidden}
 body.gated > *:not(.login-gate){filter:blur(8px);pointer-events:none;user-select:none}
-body.gated .cursor-dot,body.gated .cursor-ring{display:none}
 </style>
 </head>
 <body class="gated">
@@ -645,8 +640,6 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
 })();
 </script>
 
-<div class="cursor-dot" id="cursorDot"></div>
-<div class="cursor-ring" id="cursorRing"></div>
 
 <div class="bg-layer">
   <div class="orb orb-1"></div>
@@ -1130,25 +1123,7 @@ body.gated .cursor-dot,body.gated .cursor-ring{display:none}
 <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
 <script src="isoforma-engine.js"></script>
 <script>
-// CURSOR
-const cursorDot = document.getElementById('cursorDot');
-const cursorRing = document.getElementById('cursorRing');
-let mouseX=0, mouseY=0, ringX=0, ringY=0;
-window.addEventListener('mousemove', (e) => {
-  mouseX = e.clientX; mouseY = e.clientY;
-  cursorDot.style.left = mouseX + 'px'; cursorDot.style.top = mouseY + 'px';
-});
-function animateRing(){
-  ringX += (mouseX - ringX) * 0.15;
-  ringY += (mouseY - ringY) * 0.15;
-  cursorRing.style.left = ringX + 'px'; cursorRing.style.top = ringY + 'px';
-  requestAnimationFrame(animateRing);
-}
-animateRing();
-document.querySelectorAll('a, button, input, .upload-zone, .faq-item, .how-card, label, [onclick]').forEach(el => {
-  el.addEventListener('mouseenter', () => document.body.classList.add('hover-link'));
-  el.addEventListener('mouseleave', () => document.body.classList.remove('hover-link'));
-});
+// Cursor custom eliminado — Fase 18
 
 // NAVBAR
 const navbar = document.getElementById('navbar');

@@ -1326,6 +1326,24 @@
     const lowConfidence = [];
     const justification = []; // Fase 13: full decision log
     const paragraphs = Array.from(doc.getElementsByTagName('w:p'));
+
+    // Fase 19: Pre-scan — compute font size distribution to detect body font.
+    // This enables classifyByWordSignals to make relative comparisons
+    // (e.g., "this paragraph is 14pt but body is 11pt → likely heading").
+    const fontSizeDist = {};
+    for (const pp of paragraphs) {
+      const sig = readParagraphFormattingSignals(pp);
+      if (sig.fontSize > 0 && !sig.isInTable) {
+        fontSizeDist[sig.fontSize] = (fontSizeDist[sig.fontSize] || 0) + 1;
+      }
+    }
+    // The body font is the most common font size
+    let bodyFontSize = 20; // default 10pt
+    let maxCount = 0;
+    for (const [sz, count] of Object.entries(fontSizeDist)) {
+      if (count > maxCount) { maxCount = count; bodyFontSize = Number(sz); }
+    }
+
     for (const p of paragraphs) {
       const rawText = getParagraphTextDom(p);
       const text = normalizeParagraphText(rawText);
@@ -1391,7 +1409,7 @@
       } else if (text) {
         // 3 + 6) Normal o sin estilo → classifier adaptativo + normativo.
         // Fase 16D: primero intentar clasificar por señales de Word (outline, heading, format)
-        const wordSignal = classifyByWordSignals(p, text, doc);
+        const wordSignal = classifyByWordSignals(p, text, doc, bodyFontSize);
         if (wordSignal) {
           style = wordSignal.style;
           confidence = wordSignal.confidence;
@@ -1624,7 +1642,25 @@
 
     // FHJTtuloprrafo — numeración multi-nivel: "1.1", "1.1.", "1.1.-", "1.1)", "1.1.1.- ", etc.
     if (/^\d+(\.\d+)+[\.\-\)\s]+\S/.test(text)) {
-      return { style: 'FHJTtuloprrafo', confidence: 'high', reason: 'numbered-level-2plus' };
+      // Fase 19: but only if it's short enough to be a subtitle (not a numbered paragraph in a procedure)
+      if (text.length <= 120) {
+        return { style: 'FHJTtuloprrafo', confidence: 'high', reason: 'numbered-level-2plus' };
+      } else {
+        return { style: 'FHJPrrafo', confidence: 'high', reason: 'numbered-long-paragraph' };
+      }
+    }
+
+    // Fase 19: Lettered sub-items: "a)", "b)", "a.", "b." followed by text
+    if (/^[a-z]\)\s+\S/.test(text) || /^[a-z]\.\s+\S/.test(text)) {
+      return { style: 'FHJVietaNivel1', confidence: 'high', reason: 'lettered-sub-item' };
+    }
+
+    // Fase 19: Roman numeral sub-items: "i)", "ii)", "iii)", "iv)"
+    if (/^[ivxlc]+\)\s+\S/i.test(text) && text.length < 200) {
+      const romanPart = text.match(/^([ivxlc]+)\)/i);
+      if (romanPart && romanPart[1].length <= 4) {
+        return { style: 'FHJVietaNivel2', confidence: 'high', reason: 'roman-sub-item' };
+      }
     }
 
     // ============================================================
@@ -1777,7 +1813,14 @@
    * between title and paragraph when text alone isn't enough.
    */
   function readParagraphFormattingSignals(p) {
-    const signals = { bold: false, fontSize: 0, centered: false, colored: false, italic: false };
+    const signals = {
+      bold: false, allBold: false, fontSize: 0, centered: false,
+      colored: false, italic: false, underline: false, allCaps: false,
+      isInTable: false
+    };
+
+    // Fase 19: detect if paragraph is inside a table
+    if (findAncestorByName(p, 'w:tbl')) signals.isInTable = true;
 
     // Check pPr for alignment
     const pPr = firstChildByName(p, 'w:pPr');
@@ -1792,6 +1835,9 @@
       if (pRPr) {
         if (firstChildByName(pRPr, 'w:b')) signals.bold = true;
         if (firstChildByName(pRPr, 'w:i')) signals.italic = true;
+        if (firstChildByName(pRPr, 'w:u')) signals.underline = true;
+        const caps = firstChildByName(pRPr, 'w:caps');
+        if (caps) signals.allCaps = true;
         const sz = firstChildByName(pRPr, 'w:sz');
         if (sz) {
           const val = parseInt(sz.getAttributeNS(W_NS, 'val') || sz.getAttribute('w:val') || '0', 10);
@@ -1800,25 +1846,43 @@
       }
     }
 
-    // Check first run for bold/size
+    // Check ALL runs for bold/size/underline (Fase 19: track allBold)
     const runs = p.getElementsByTagName('w:r');
-    if (runs.length > 0) {
-      const rPr = firstChildByName(runs[0], 'w:rPr');
+    let boldCount = 0;
+    let textRunCount = 0;
+    for (let ri = 0; ri < runs.length; ri++) {
+      const r = runs[ri];
+      // Skip runs that are just tab/break (no w:t child)
+      const hasText = r.getElementsByTagName('w:t').length > 0;
+      if (!hasText) continue;
+      textRunCount++;
+      const rPr = firstChildByName(r, 'w:rPr');
       if (rPr) {
-        if (firstChildByName(rPr, 'w:b')) signals.bold = true;
+        if (firstChildByName(rPr, 'w:b')) { signals.bold = true; boldCount++; }
         if (firstChildByName(rPr, 'w:i')) signals.italic = true;
-        const sz = firstChildByName(rPr, 'w:sz');
-        if (sz) {
-          const val = parseInt(sz.getAttributeNS(W_NS, 'val') || sz.getAttribute('w:val') || '0', 10);
-          if (val > 0 && !signals.fontSize) signals.fontSize = val;
-        }
-        const color = firstChildByName(rPr, 'w:color');
-        if (color) {
-          const val = color.getAttributeNS(W_NS, 'val') || color.getAttribute('w:val') || '';
-          if (val && val !== '000000' && val !== 'auto') signals.colored = true;
+        if (firstChildByName(rPr, 'w:u')) signals.underline = true;
+        const caps = firstChildByName(rPr, 'w:caps');
+        if (caps) signals.allCaps = true;
+        if (ri === 0) {
+          const sz = firstChildByName(rPr, 'w:sz');
+          if (sz) {
+            const val = parseInt(sz.getAttributeNS(W_NS, 'val') || sz.getAttribute('w:val') || '0', 10);
+            if (val > 0 && !signals.fontSize) signals.fontSize = val;
+          }
+          const color = firstChildByName(rPr, 'w:color');
+          if (color) {
+            const val = color.getAttributeNS(W_NS, 'val') || color.getAttribute('w:val') || '';
+            if (val && val !== '000000' && val !== 'auto') signals.colored = true;
+          }
         }
       }
     }
+    signals.allBold = textRunCount > 0 && boldCount === textRunCount;
+
+    // Convenience aliases for callers using old names
+    signals.isBold = signals.bold;
+    signals.isCentered = signals.centered;
+    signals.isUnderline = signals.underline;
 
     return signals;
   }
@@ -1930,6 +1994,66 @@
           e.explanation = 'Los párrafos adyacentes numerados (' + (num - 1) + './' + (num + 1) + '.) son títulos → este también lo es (coherencia de secuencia).';
           corrections++;
           titleNumbers.add(num);
+        }
+      }
+    }
+
+    // --- Pass 4 (Fase 19): Lonely subtitle demotion ---
+    // A FHJTtuloprrafo that appears with no FHJTtulo1 before it is suspicious.
+    // If the first non-preserved heading in the document is a subtitle, demote it.
+    let seenTitulo1 = false;
+    for (const e of entries) {
+      if (e.reason === 'preserved-fhj') continue;
+      if (e.style === 'FHJTtulo1') { seenTitulo1 = true; continue; }
+      if (e.style === 'FHJTtuloprrafo' && !seenTitulo1 && e.confidence === 'medium') {
+        e.style = 'FHJPrrafo';
+        e.confidence = 'high';
+        e.reason = 'lonely-subtitle-demote';
+        e.explanation = 'Subtítulo suelto sin título padre previo → reclasificado como párrafo.';
+        corrections++;
+      }
+    }
+
+    // --- Pass 5 (Fase 19): Table-of-contents detection ---
+    // If we see many consecutive TOC-like entries (e.g., "XXXX......3"),
+    // demote any that were falsely classified as titles.
+    let tocStreak = 0;
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const text = e.text || '';
+      const isTocLike = /^.{3,80}\s*[\.·…]{3,}\s*\d+\s*$/.test(text) ||
+                        /^.{3,80}\t+\d+\s*$/.test(text);
+      if (isTocLike) {
+        tocStreak++;
+        if (tocStreak >= 3 && e.style !== 'FHJPrrafo') {
+          e.style = 'FHJPrrafo';
+          e.confidence = 'high';
+          e.reason = 'toc-block-demote';
+          e.explanation = 'Dentro de un bloque de índice/sumario → párrafo.';
+          corrections++;
+        }
+      } else {
+        tocStreak = 0;
+      }
+    }
+
+    // --- Pass 6 (Fase 19): Short isolated medium-confidence title after paragraph → demote ---
+    // Prevents false positive titles that appear mid-sentence (e.g., "NOTA: ...")
+    for (let i = 1; i < entries.length - 1; i++) {
+      const e = entries[i];
+      if (e.style !== 'FHJTtulo1' || e.confidence !== 'medium') continue;
+      const prev = entries[i - 1];
+      const next = entries[i + 1];
+      // If both neighbors are paragraphs and this is short all-caps, suspect it's inline emphasis
+      if (prev.style === 'FHJPrrafo' && next.style === 'FHJPrrafo' &&
+          (e.text || '').length < 30 && e.reason !== 'annex' && e.reason !== 'anchor-objeto') {
+        // Check if it's an inline label like "NOTA:", "IMPORTANTE:", "ADVERTENCIA:"
+        if (/^[A-ZÁÉÍÓÚÑ\s]+:\s*$/.test((e.text || '').trim() + ':')) {
+          e.style = 'FHJPrrafo';
+          e.confidence = 'high';
+          e.reason = 'inline-label-demote';
+          e.explanation = 'Etiqueta inline entre párrafos (p.ej. "NOTA:") → párrafo, no título.';
+          corrections++;
         }
       }
     }
@@ -2079,12 +2203,14 @@
    * Fase 19: Sanitize serialized XML to fix common XMLSerializer output issues.
    *
    * 1) Ensure the XML declaration is present and correct.
-   * 2) Remove duplicate namespace declarations on child elements that the
-   *    XMLSerializer may redundantly emit (safe because the root already declares them).
-   * 3) Fix any `xmlns:w=""` or `xmlns:r=""` empty namespace bindings that
+   * 2) Fix any `xmlns:w=""` or `xmlns:r=""` empty namespace bindings that
    *    some browsers produce when elements are created via createElementNS
    *    but attributes are set with setAttribute (non-namespaced).
-   * 4) Ensure standalone="yes" to suppress DTD validation issues.
+   * 3) Validate the result can be re-parsed without errors.
+   *
+   * NOTE: We do NOT remove duplicate namespace declarations. They are
+   * redundant but harmless, and aggressive removal can corrupt the XML
+   * if the string-based approach breaks a tag boundary.
    */
   function sanitizeSerializedXml(xml) {
     // 1) Ensure XML declaration
@@ -2092,38 +2218,22 @@
       xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' + xml;
     }
 
-    // 2) Remove duplicate namespace declarations on non-root elements.
-    //    Keep the FIRST occurrence (on the root element), remove subsequent ones.
-    //    Pattern: xmlns:w="..." appearing on child elements.
-    const nsDecls = [
-      'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"',
-      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"',
-      'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"',
-      'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"',
-      'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"'
-    ];
-    for (const decl of nsDecls) {
-      const idx = xml.indexOf(decl);
-      if (idx === -1) continue;
-      // Find the next occurrence after the first one
-      let pos = xml.indexOf(decl, idx + decl.length);
-      while (pos !== -1) {
-        // Check this isn't at the very start of the root element
-        // Remove the duplicate (and any leading space)
-        const before = xml[pos - 1];
-        if (before === ' ' || before === '\n' || before === '\t') {
-          xml = xml.slice(0, pos - 1) + xml.slice(pos + decl.length);
-        } else {
-          xml = xml.slice(0, pos) + xml.slice(pos + decl.length);
-        }
-        pos = xml.indexOf(decl, pos);
-      }
-    }
+    // 2) Fix empty namespace bindings (xmlns:w="" or xmlns:r="")
+    //    These are produced by some browsers when setAttribute('w:foo')
+    //    is used on elements not in the w: namespace.
+    xml = xml.replace(/ xmlns:\w+=""/g, '');
 
-    // 3) Fix empty namespace bindings (xmlns:w="" or xmlns:r="")
-    xml = xml.replace(/ xmlns:w=""/g, '');
-    xml = xml.replace(/ xmlns:r=""/g, '');
-    xml = xml.replace(/ xmlns:mc=""/g, '');
+    // 3) Validate: re-parse to catch any corruption early
+    try {
+      const testDoc = new DOMParser().parseFromString(xml, 'application/xml');
+      const errNode = testDoc.getElementsByTagName('parsererror')[0];
+      if (errNode) {
+        // Log but don't throw — return original XML, Word might still handle it
+        if (typeof console !== 'undefined') {
+          console.warn('sanitizeSerializedXml: re-parse detected error:', (errNode.textContent || '').slice(0, 200));
+        }
+      }
+    } catch (e) { /* swallow — validation is best-effort */ }
 
     return xml;
   }
@@ -2650,7 +2760,8 @@
   //   - Centered + bold + short → probable título
   // ============================================================
 
-  function classifyByWordSignals(p, text, doc) {
+  function classifyByWordSignals(p, text, doc, bodyFontSize) {
+    bodyFontSize = bodyFontSize || 20;
     if (!text) return null;
 
     const pPr = firstChildByName(p, 'w:pPr');
@@ -2675,22 +2786,60 @@
       if (/^heading\s*[2-4]$|^titulo\s*[2-4]$|^título\s*[2-4]$/i.test(lower) || /^heading[2-4]$/.test(lower)) {
         return { style: 'FHJTtuloprrafo', confidence: 'high', reason: 'native-heading' + lower.slice(-1) };
       }
+      // Fase 19: detect TOC styles — never restyle them
+      if (/^toc\s*\d|^tdc\s*\d|^ndice|^índice|^tableoffigures|^tableofauthorities/i.test(lower) ||
+          /^TOC/.test(existingStyle)) {
+        return { style: null, confidence: 'high', reason: 'toc-style-preserved' };
+      }
+      // Detect subtitle/subheading styles from other templates
+      if (/^sub(title|heading|t[ií]tulo)/i.test(lower)) {
+        return { style: 'FHJTtuloprrafo', confidence: 'high', reason: 'native-subtitle-style' };
+      }
+      // Detect caption styles
+      if (/^caption|^epígrafe|^pie\s*de/i.test(lower)) {
+        return { style: 'FHJPrrafo', confidence: 'high', reason: 'native-caption-style' };
+      }
+      // Detect footnote/endnote text styles
+      if (/^footnote|^endnote|^nota\s*al\s*pie/i.test(lower)) {
+        return { style: 'FHJPrrafo', confidence: 'high', reason: 'native-footnote-style' };
+      }
     }
 
     // Check formatting signals: bold + large font + short text = likely title
     const signals = readParagraphFormattingSignals(p, doc);
+
+    // Fase 19: Detect underline-only emphasis (not a title, just emphasized text)
+    if (signals.isUnderline && !signals.isBold && text.length > 80) {
+      return null; // Let regex classifier handle it as paragraph
+    }
+
     if (signals.isBold && text.length < 80) {
-      if (signals.fontSize && signals.fontSize >= 24) { // 12pt = sz 24
+      // Fase 19: use relative font size comparison instead of absolute thresholds
+      const isLarger = signals.fontSize > 0 && signals.fontSize > bodyFontSize + 2;
+      const isMuchLarger = signals.fontSize > 0 && signals.fontSize >= bodyFontSize + 6;
+      if (isMuchLarger) {
         return { style: 'FHJTtulo1', confidence: 'high', reason: 'format-bold-large' };
       }
-      if (signals.fontSize && signals.fontSize >= 22 && text.length < 60) { // 11pt bold short
+      if (isLarger && text.length < 60) {
         return { style: 'FHJTtuloprrafo', confidence: 'medium', reason: 'format-bold-medium' };
+      }
+      // Fallback to absolute thresholds for docs without font size info
+      if (!signals.fontSize && signals.allBold && text.length < 50) {
+        return { style: 'FHJTtulo1', confidence: 'medium', reason: 'format-bold-no-size' };
       }
     }
 
     // Centered + bold + short → likely title
     if (signals.isBold && signals.isCentered && text.length < 100) {
       return { style: 'FHJTtulo1', confidence: 'medium', reason: 'format-centered-bold' };
+    }
+
+    // Fase 19: Bold-only short text without large font → subtitle candidate
+    if (signals.isBold && !signals.isCentered && text.length < 60 && text.length >= 3) {
+      // Only if it doesn't start with a number (those go through regex classifier)
+      if (!/^\d/.test(text)) {
+        return { style: 'FHJTtuloprrafo', confidence: 'medium', reason: 'format-bold-short' };
+      }
     }
 
     return null; // No strong signal, fall through to regex classifier
@@ -2704,9 +2853,21 @@
       docGrid: { linePitch: '360' }
     };
 
-    const sectPrs = doc.getElementsByTagName('w:sectPr');
-    if (sectPrs.length === 0) return;
-    const sectPr = sectPrs[0];
+    // IMPORTANT: documents may have multiple sectPr — mid-document section breaks
+    // live inside <w:pPr> elements, but the BODY sectPr is the last direct child
+    // of <w:body>. We MUST only modify the body-level sectPr.
+    const body = doc.getElementsByTagName('w:body')[0];
+    if (!body) return;
+    let sectPr = null;
+    // Find the last w:sectPr that is a direct child of w:body
+    for (let n = body.lastChild; n; n = n.previousSibling) {
+      if (n.nodeType === 1 && nodeNameMatches(n, 'w:sectPr')) { sectPr = n; break; }
+    }
+    if (!sectPr) {
+      // No sectPr found — create one
+      sectPr = doc.createElementNS(W_NS, 'w:sectPr');
+      body.appendChild(sectPr);
+    }
     while (sectPr.firstChild) sectPr.removeChild(sectPr.firstChild);
 
     const ref = (tag, type, rid) => {
