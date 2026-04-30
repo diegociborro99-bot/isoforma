@@ -1801,6 +1801,29 @@ function renderNormativa(nrm) {
         ? nrm.indentation.touched + ' párrafo' + (nrm.indentation.touched === 1 ? '' : 's') + ' con indentación del referente'
         : 'sin blueprint de estilos',
       on: !!(nrm.indentation && nrm.indentation.applied)
+    },
+    {
+      key: 'quality',
+      label: 'Calidad avanzada de documento',
+      detail: nrm.quality
+        ? (function(q) {
+            const parts = [];
+            const totalAntiOrphan = (q.antiOrphanKeep || 0) + (q.shortParaKeepLines || 0) + (q.sectionBreakOrphanFix || 0);
+            if (totalAntiOrphan > 0) parts.push(totalAntiOrphan + ' anti-huérfano');
+            if (q.tableWidthNormalized > 0) parts.push(q.tableWidthNormalized + ' tablas al 100%');
+            if (q.tableLayoutFixed > 0) parts.push(q.tableLayoutFixed + ' layout fijo');
+            if (q.smallTableKeepTogether > 0) parts.push(q.smallTableKeepTogether + ' tablas agrupadas');
+            if (q.tableTitleKept > 0) parts.push(q.tableTitleKept + ' títulos de tabla vinculados');
+            if (q.widowOrphan > 0) parts.push(q.widowOrphan + ' widow/orphan');
+            if (q.keepNext > 0) parts.push(q.keepNext + ' keepNext');
+            if (q.pageBreakBefore > 0) parts.push(q.pageBreakBefore + ' saltos de página');
+            return parts.length > 0 ? parts.join(' · ') : 'sin ajustes necesarios';
+          })(nrm.quality)
+        : 'sin datos',
+      on: !!(nrm.quality && ((nrm.quality.antiOrphanKeep || 0) + (nrm.quality.tableWidthNormalized || 0) +
+            (nrm.quality.tableLayoutFixed || 0) + (nrm.quality.smallTableKeepTogether || 0) +
+            (nrm.quality.tableTitleKept || 0) + (nrm.quality.widowOrphan || 0) +
+            (nrm.quality.keepNext || 0) + (nrm.quality.pageBreakBefore || 0) > 0))
     }
   ];
 

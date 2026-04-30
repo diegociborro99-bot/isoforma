@@ -475,7 +475,7 @@
     // Fase 17: Document quality enforcement (widow/orphan, post-table spacing, table centering)
     progress('Mejorando calidad del documento');
     const qualityStats = await runStep('Calidad de documento', () =>
-      enforceDocumentQuality(docDoc)
+      enforceDocumentQuality(docDoc, refTableStyle)
     );
 
     // Fase 12 · B4 — Tabulación de listas §4.2.4.3 a nivel de párrafo.
@@ -669,7 +669,14 @@
             preTableSpacing: qualityStats.preTableSpacing,
             tableCentered: qualityStats.tableCentered,
             tableCellMargin: qualityStats.tableCellMargin,
-            tableKeepTogether: qualityStats.tableKeepTogether
+            tableKeepTogether: qualityStats.tableKeepTogether,
+            antiOrphanKeep: qualityStats.antiOrphanKeep,
+            shortParaKeepLines: qualityStats.shortParaKeepLines,
+            tableWidthNormalized: qualityStats.tableWidthNormalized,
+            tableLayoutFixed: qualityStats.tableLayoutFixed,
+            smallTableKeepTogether: qualityStats.smallTableKeepTogether,
+            tableTitleKept: qualityStats.tableTitleKept,
+            sectionBreakOrphanFix: qualityStats.sectionBreakOrphanFix
           }
         },
         // Fase 13: justification log — every paragraph classification decision
@@ -3468,11 +3475,15 @@
   // Fixes widow/orphan, post-table spacing, and table centering
   // for all tables (including those without a reference style).
   // ============================================================
-  function enforceDocumentQuality(doc) {
+  function enforceDocumentQuality(doc, refTableStyle) {
     const stats = {
       widowOrphan: 0, keepNext: 0, keepLines: 0, pageBreakBefore: 0,
       postTableSpacing: 0, preTableSpacing: 0, tableCentered: 0,
-      tableCellMargin: 0, tableKeepTogether: 0
+      tableCellMargin: 0, tableKeepTogether: 0,
+      antiOrphanKeep: 0, shortParaKeepLines: 0,
+      tableWidthNormalized: 0, tableLayoutFixed: 0,
+      smallTableKeepTogether: 0, tableTitleKept: 0,
+      sectionBreakOrphanFix: 0
     };
     const body = doc.getElementsByTagName('w:body')[0];
     if (!body) return stats;
@@ -3652,7 +3663,8 @@
         }
         stats.tableKeepTogether++;
 
-        // Uniform vAlign center on all cells
+        // Uniform vAlign on all cells — use reference vAlign if available, else center
+        const refVAlign = _detectRefVAlign(refTableStyle);
         const cells = Array.from(row.childNodes).filter(n => n.nodeName === 'w:tc');
         for (const tc of cells) {
           let tcPr = firstChildByName(tc, 'w:tcPr');
@@ -3662,14 +3674,177 @@
           }
           if (!firstChildByName(tcPr, 'w:vAlign')) {
             const vAlign = doc.createElementNS(W_NS, 'w:vAlign');
-            vAlign.setAttribute('w:val', 'center');
+            vAlign.setAttribute('w:val', refVAlign);
             tcPr.appendChild(vAlign);
+          }
+        }
+      }
+
+      // B6) Table width normalization — ensure 100% page width
+      const tblW = firstChildByName(tblPr, 'w:tblW');
+      if (!tblW) {
+        const newTblW = doc.createElementNS(W_NS, 'w:tblW');
+        newTblW.setAttribute('w:w', '5000');
+        newTblW.setAttribute('w:type', 'pct');
+        tblPr.appendChild(newTblW);
+        stats.tableWidthNormalized++;
+      } else {
+        const wType = tblW.getAttributeNS(W_NS, 'type') || tblW.getAttribute('w:type') || '';
+        if (wType === 'auto' || wType === '') {
+          tblW.setAttribute('w:w', '5000');
+          tblW.setAttribute('w:type', 'pct');
+          stats.tableWidthNormalized++;
+        }
+      }
+
+      // B7) Table layout fixed for predictable column widths
+      if (!firstChildByName(tblPr, 'w:tblLayout')) {
+        const tblLayout = doc.createElementNS(W_NS, 'w:tblLayout');
+        tblLayout.setAttribute('w:type', 'fixed');
+        tblPr.appendChild(tblLayout);
+        stats.tableLayoutFixed++;
+      }
+
+      // B8) Small tables (<=8 rows) — keep together on one page
+      const rowCount = rows.length;
+      if (rowCount > 0 && rowCount <= 8) {
+        // Ensure cantSplit on ALL rows (already done in B5, but confirm)
+        for (const row of rows) {
+          let trPr = firstChildByName(row, 'w:trPr');
+          if (!trPr) {
+            trPr = doc.createElementNS(W_NS, 'w:trPr');
+            row.insertBefore(trPr, row.firstChild);
+          }
+          if (!firstChildByName(trPr, 'w:cantSplit')) {
+            trPr.appendChild(doc.createElementNS(W_NS, 'w:cantSplit'));
+          }
+        }
+        // keepNext on paragraph before this table so title+table stay together
+        const prevP = tbl.previousSibling;
+        if (prevP && prevP.nodeName === 'w:p' && !tableParas.has(prevP)) {
+          let pPr = firstChildByName(prevP, 'w:pPr');
+          if (!pPr) {
+            pPr = doc.createElementNS(W_NS, 'w:pPr');
+            prevP.insertBefore(pPr, prevP.firstChild);
+          }
+          if (!firstChildByName(pPr, 'w:keepNext')) {
+            pPr.appendChild(doc.createElementNS(W_NS, 'w:keepNext'));
+            stats.smallTableKeepTogether++;
+          }
+        }
+      }
+
+      // B9) Keep table title/caption with table
+      const prevPara = tbl.previousSibling;
+      if (prevPara && prevPara.nodeName === 'w:p' && !tableParas.has(prevPara)) {
+        const prevText = (getParagraphTextDom(prevPara) || '').trim();
+        if (/^(Tabla|Table|Cuadro|Fig\.|Figura|Figure)\s/i.test(prevText)) {
+          let pPr = firstChildByName(prevPara, 'w:pPr');
+          if (!pPr) {
+            pPr = doc.createElementNS(W_NS, 'w:pPr');
+            prevPara.insertBefore(pPr, prevPara.firstChild);
+          }
+          if (!firstChildByName(pPr, 'w:keepNext')) {
+            pPr.appendChild(doc.createElementNS(W_NS, 'w:keepNext'));
+            stats.tableTitleKept++;
+          }
+        }
+      }
+    }
+
+    // --- C) Anti-orphan / stray line protection ---
+    const allParas = Array.from(body.getElementsByTagName('w:p'));
+    for (let idx = 0; idx < allParas.length; idx++) {
+      const p = allParas[idx];
+      if (tableParas.has(p)) continue;
+
+      const text = (getParagraphTextDom(p) || '').trim();
+      const textLen = text.length;
+
+      // C1) Short paragraph after a long one — add keepLines to prevent stranding
+      if (textLen > 0 && textLen < 30 && idx > 0) {
+        const prevP = allParas[idx - 1];
+        if (!tableParas.has(prevP)) {
+          const prevText = (getParagraphTextDom(prevP) || '').trim();
+          if (prevText.length > 80) {
+            let pPr = firstChildByName(p, 'w:pPr');
+            if (!pPr) {
+              pPr = doc.createElementNS(W_NS, 'w:pPr');
+              p.insertBefore(pPr, p.firstChild);
+            }
+            if (!firstChildByName(pPr, 'w:keepLines')) {
+              pPr.appendChild(doc.createElementNS(W_NS, 'w:keepLines'));
+              stats.shortParaKeepLines++;
+            }
+          }
+        }
+      }
+
+      // C2) If this is the last paragraph before a table or section break,
+      //     and it has only 1-2 short lines, keep it with previous via keepNext on prev
+      if (textLen > 0 && textLen < 60 && idx > 0) {
+        const nextSib = p.nextSibling;
+        const isBeforeTable = nextSib && nextSib.nodeName === 'w:tbl';
+        const hasSectPr = firstChildByName(firstChildByName(p, 'w:pPr') || p, 'w:sectPr');
+        const hasPageBreak = firstChildByName(firstChildByName(p, 'w:pPr') || p, 'w:pageBreakBefore');
+
+        if (isBeforeTable || hasSectPr || hasPageBreak) {
+          const prevP = allParas[idx - 1];
+          if (!tableParas.has(prevP)) {
+            let prevPPr = firstChildByName(prevP, 'w:pPr');
+            if (!prevPPr) {
+              prevPPr = doc.createElementNS(W_NS, 'w:pPr');
+              prevP.insertBefore(prevPPr, prevP.firstChild);
+            }
+            if (!firstChildByName(prevPPr, 'w:keepNext')) {
+              prevPPr.appendChild(doc.createElementNS(W_NS, 'w:keepNext'));
+              stats.antiOrphanKeep++;
+            }
+          }
+        }
+      }
+
+      // C3) After section break or pageBreakBefore — if next paragraph is very short,
+      //     add keepNext to this paragraph so the short one stays with content
+      const pPr = firstChildByName(p, 'w:pPr');
+      const hasPBB = pPr && firstChildByName(pPr, 'w:pageBreakBefore');
+      const hasSect = pPr && firstChildByName(pPr, 'w:sectPr');
+      if ((hasPBB || hasSect) && idx + 1 < allParas.length) {
+        const nextP = allParas[idx + 1];
+        if (!tableParas.has(nextP)) {
+          const nextText = (getParagraphTextDom(nextP) || '').trim();
+          if (nextText.length > 0 && nextText.length < 20) {
+            // Add keepNext to this paragraph so the short next paragraph stays attached
+            if (pPr && !firstChildByName(pPr, 'w:keepNext')) {
+              pPr.appendChild(doc.createElementNS(W_NS, 'w:keepNext'));
+              stats.sectionBreakOrphanFix++;
+            }
           }
         }
       }
     }
 
     return stats;
+
+    // Helper: detect vAlign from reference table style
+    function _detectRefVAlign(refStyle) {
+      if (!refStyle || !refStyle.found) return 'center';
+      // Check body row tcPrs for vAlign
+      const tcPrs = refStyle.bodyRowTcPrs || [];
+      for (const tcPrXml of tcPrs) {
+        if (!tcPrXml) continue;
+        const match = tcPrXml.match(/w:vAlign\s+w:val="([^"]+)"/);
+        if (match) return match[1];
+      }
+      // Check header row tcPrs
+      const headerTcPrs = refStyle.firstRowTcPrs || [];
+      for (const tcPrXml of headerTcPrs) {
+        if (!tcPrXml) continue;
+        const match = tcPrXml.match(/w:vAlign\s+w:val="([^"]+)"/);
+        if (match) return match[1];
+      }
+      return 'center'; // default
+    }
   }
 
   // ============================================================
