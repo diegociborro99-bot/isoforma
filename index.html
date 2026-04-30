@@ -678,7 +678,7 @@ body.gated > *:not(.login-gate){filter:blur(8px);pointer-events:none;user-select
     <div class="hero-content">
       <div class="hero-eyebrow">
         <span class="hero-eyebrow-dot"></span>
-        Fundación Hospital de Jove · v0.11 beta
+        Fundación Hospital de Jove · v0.12 beta
       </div>
       <h1>
         <span class="line"><span class="line-inner">Un documento,</span></span>
@@ -1112,7 +1112,7 @@ body.gated > *:not(.login-gate){filter:blur(8px);pointer-events:none;user-select
       </div>
     </div>
     <div class="footer-bottom">
-      <span>Isoforma · v0.11</span>
+      <span>Isoforma · v0.12</span>
       <span>Fundación Hospital de Jove · 2026</span>
     </div>
     <div class="footer-signature">vibe coded with <span class="heart">&#9829;</span> by <em>Highkey Labs</em></div>
@@ -1824,6 +1824,36 @@ function renderNormativa(nrm) {
             (nrm.quality.tableLayoutFixed || 0) + (nrm.quality.smallTableKeepTogether || 0) +
             (nrm.quality.tableTitleKept || 0) + (nrm.quality.widowOrphan || 0) +
             (nrm.quality.keepNext || 0) + (nrm.quality.pageBreakBefore || 0) > 0))
+    },
+    // Phase 20 features
+    {
+      key: 'phase20',
+      label: 'Motor avanzado v2.0',
+      detail: nrm.phase20
+        ? (function(p) {
+            const parts = [];
+            if (p.imageBounds && p.imageBounds.imagesScaled > 0) parts.push(p.imageBounds.imagesScaled + ' imágenes escaladas');
+            if (p.blankPages && p.blankPages.breaksRemoved > 0) parts.push(p.blankPages.breaksRemoved + ' saltos eliminados');
+            if (p.emptyParas && p.emptyParas.parasRemoved > 0) parts.push(p.emptyParas.parasRemoved + ' párrafos vacíos limpiados');
+            if (p.headerRows && p.headerRows.headersDetected > 0) parts.push(p.headerRows.headersDetected + ' headers de tabla');
+            if (p.crossRefs && p.crossRefs.refsUpdated > 0) parts.push(p.crossRefs.refsUpdated + ' referencias cruzadas');
+            if (p.footnotes) {
+              const fnTotal = (p.footnotes.footnotesStyled || 0) + (p.footnotes.endnotesStyled || 0);
+              if (fnTotal > 0) parts.push(fnTotal + ' notas estiladas');
+            }
+            if (p.hyperlinks && p.hyperlinks.hyperlinksStyled > 0) parts.push(p.hyperlinks.hyperlinksStyled + ' hipervínculos');
+            return parts.length > 0 ? parts.join(' · ') : 'sin ajustes necesarios';
+          })(nrm.phase20)
+        : 'sin datos',
+      on: !!(nrm.phase20 && (function(p) {
+        return (p.imageBounds && p.imageBounds.imagesScaled > 0) ||
+               (p.blankPages && p.blankPages.breaksRemoved > 0) ||
+               (p.emptyParas && p.emptyParas.parasRemoved > 0) ||
+               (p.headerRows && p.headerRows.headersDetected > 0) ||
+               (p.crossRefs && p.crossRefs.refsUpdated > 0) ||
+               (p.footnotes && ((p.footnotes.footnotesStyled || 0) + (p.footnotes.endnotesStyled || 0) > 0)) ||
+               (p.hyperlinks && p.hyperlinks.hyperlinksStyled > 0);
+      })(nrm.phase20 || {}))
     }
   ];
 

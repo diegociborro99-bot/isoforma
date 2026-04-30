@@ -89,11 +89,21 @@ Self-contained. Sin build step, sin dependencias locales. Librerías JSZip y Fil
 
 ## Versión
 
-v0.11.0 · Engine v1.9 — abril 2026
+v0.12.0 · Engine v2.0 — abril 2026
 Fundación Hospital de Jove · Servicio de Laboratorio
 
 ## Changelog
 
+- **v0.12.0 · Engine v2.0 (Fase 20)** — Motor avanzado con 7 nuevas pasadas de calidad:
+  - **Image Overflow Protection** — `enforceImageBounds(doc, refLayout)` detecta `<w:drawing>` y `<v:shape>` que exceden el ancho disponible de página (calculado desde `pgSz` y `pgMar` del referente, convertido a EMU) y escala proporcionalmente ambas dimensiones. Soporta `a:ext`, `wp:extent` y estilos inline `width:XXXpt`.
+  - **Blank Page Elimination** — `eliminateBlankPages(doc)` elimina `<w:pageBreakBefore>` y `<w:br type="page"/>` de párrafos vacíos seguidos de otro párrafo vacío. Colapsa saltos de página consecutivos duplicados en un solo run.
+  - **Smart Header Row Detection** — `detectAndMarkHeaderRows(doc)` analiza la primera fila de cada tabla buscando señales de cabecera (negrita, sombreado, ALL CAPS) y asegura `<w:tblHeader/>`. Detecta cabeceras multi-fila (2 filas header).
+  - **Cross-Reference Audit** — `repairCrossReferences(doc)` escanea `<w:t>` buscando patrones "Tabla N" / "Figura N" / "Table N" / "Figure N" excluyendo títulos con highlight amarillo, y reporta el número de referencias encontradas para revisión.
+  - **Footnote/Endnote FHJ Styling** — `enforceFootnoteStyle(outputZip)` aplica Arial 9pt (`sz=18`) con `szCs` a todos los runs de `word/footnotes.xml` y `word/endnotes.xml`.
+  - **Hyperlink Style Enforcement** — `enforceHyperlinkStyle(doc)` normaliza todos los `<w:hyperlink>` del body: Arial 10pt, color `1F3D2B` (verde FHJ), sin subrayado.
+  - **Smart Empty Paragraph Cleanup** — `collapseEmptyParagraphs(doc)` detecta runs de 3+ párrafos vacíos consecutivos (sin texto, imágenes, listas, sectPr ni pageBreak) y los colapsa a 1. Preserva separadores intencionales.
+  - **UI**: nuevo chip "Motor avanzado v2.0" en la checklist de cumplimiento normativo con detalle de cada sub-pasada.
+  - Stats: `stats.normativa.phase20 = { imageBounds, blankPages, emptyParas, headerRows, crossRefs, footnotes, hyperlinks }`.
 - **v0.11.0 · Engine v1.9 (Fase 12)** — Cumplimiento normativo §4 integral (*Recomendaciones para elaboración de documentos*):
   - **B1 · Enforce espaciado e interlineado §4.3** — nueva pasada `enforceFHJSpacing(doc)` que reescribe `<w:spacing>` por cada estilo FHJ (antes/después/interlineado canónico): `FHJTtulo1` 240/120/1.5, `FHJTtuloprrafo` 240/60/1.5, `FHJPrrafo` 0/120/1.5, `FHJVietaNivel*` 0/60/1.0, `FHJListaNivel*` 0/60/1.0. Forzando `lineRule=auto` y eliminando autospacings huérfanos. Activa por defecto; flag `enforceSpacing: false`.
   - **B2 · Enforce Arial §4.2.1 / §4.2.3.2** — nueva pasada `enforceArialTypography(doc)` que fuerza `rFonts=Arial` y `sz=20` (10 pt) en todos los runs del cuerpo; detecta párrafos "Fuente: …" bajo tabla y les aplica Arial 9 cursiva (`sz=18`, `<w:i/>`) por §4.2.3.2. Activa por defecto; flag `enforceTypography: false`.
