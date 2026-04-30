@@ -49,6 +49,7 @@
 
   const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
   const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const RELS_PKG_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
 
   // ============================================================
   // Fase 12: Normativa FHJ canónica
@@ -602,7 +603,7 @@
     );
     if (pStyleWarning) warnings.push(pStyleWarning);
 
-    const serializedDocXml = sanitizeSerializedXml(new XMLSerializer().serializeToString(docDoc));
+    const serializedDocXml = ensureDocumentNamespaces(sanitizeSerializedXml(new XMLSerializer().serializeToString(docDoc)));
     outputZip.file('word/document.xml', serializedDocXml);
 
     // Fase 20: Footnote/Endnote styling — operates on zip files after serialization
@@ -1287,14 +1288,14 @@
     const root = doc.documentElement;
     for (const rel of newRels) {
       const id = 'rId' + (nextId++);
-      const el = doc.createElement('Relationship');
+      const el = doc.createElementNS(RELS_PKG_NS, 'Relationship');
       el.setAttribute('Id', id);
       el.setAttribute('Type', baseType + rel.type);
       el.setAttribute('Target', rel.target);
       root.appendChild(el);
       ids[rel.target.replace('.xml', '')] = id;
     }
-    outputZip.file('word/_rels/document.xml.rels', sanitizeSerializedXml(new XMLSerializer().serializeToString(doc)));
+    outputZip.file('word/_rels/document.xml.rels', sanitizeRelsXml(new XMLSerializer().serializeToString(doc)));
     return ids;
   }
 
@@ -2277,22 +2278,184 @@
       xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' + xml;
     }
 
-    // 2) Fix empty namespace bindings (xmlns:w="" or xmlns:r="")
-    //    These are produced by some browsers when setAttribute('w:foo')
-    //    is used on elements not in the w: namespace.
+    // 2) Remove empty namespace bindings (xmlns:w="" or xmlns:r="")
+    //    Produced by some browsers when setAttribute('w:foo') is used on
+    //    elements not in the w: namespace.
     xml = xml.replace(/ xmlns:\w+=""/g, '');
 
-    // 3) Validate: re-parse to catch any corruption early
+    // 3) Fix browser XMLSerializer ns0/ns1/... prefix pollution.
+    //    Some DOMParser+XMLSerializer combos rename w: to ns0:, r: to ns1:, etc.
+    //    Map them back to the correct OOXML prefixes.
+    const nsMap = {
+      'http://schemas.openxmlformats.org/wordprocessingml/2006/main': 'w',
+      'http://schemas.openxmlformats.org/officeDocument/2006/relationships': 'r',
+      'http://schemas.openxmlformats.org/markup-compatibility/2006': 'mc',
+      'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing': 'wp',
+      'http://schemas.openxmlformats.org/drawingml/2006/main': 'a',
+      'http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing': 'wp14',
+      'http://schemas.microsoft.com/office/word/2010/wordml': 'w14',
+      'urn:schemas-microsoft-com:vml': 'v',
+      'urn:schemas-microsoft-com:office:office': 'o',
+      'http://schemas.openxmlformats.org/officeDocument/2006/math': 'm',
+      'urn:schemas-microsoft-com:office:word': 'w10',
+      'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup': 'wpg',
+      'http://schemas.microsoft.com/office/word/2010/wordprocessingShape': 'wps',
+      'http://schemas.microsoft.com/office/word/2010/wordprocessingInk': 'wpi',
+      'http://schemas.microsoft.com/office/word/2006/wordml': 'wne',
+      'http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas': 'wpc',
+    };
+    // Replace xmlns:nsN="<known-uri>" with xmlns:correctPrefix="<known-uri>"
+    // and then fix all nsN: prefixed tags/attrs to use the correct prefix.
+    const nsNPattern = /xmlns:(ns\d+)="([^"]+)"/g;
+    let match;
+    const replacements = [];
+    while ((match = nsNPattern.exec(xml)) !== null) {
+      const syntheticPrefix = match[1]; // e.g. "ns0"
+      const uri = match[2];
+      const correctPrefix = nsMap[uri];
+      if (correctPrefix && syntheticPrefix !== correctPrefix) {
+        replacements.push({ from: syntheticPrefix, to: correctPrefix, uri: uri });
+      }
+    }
+    for (const rep of replacements) {
+      // Replace the xmlns declaration
+      xml = xml.split('xmlns:' + rep.from + '="' + rep.uri + '"').join('xmlns:' + rep.to + '="' + rep.uri + '"');
+      // Replace opening/closing tags and attribute prefixes
+      // Use a regex that matches the synthetic prefix in tag/attribute positions
+      const tagRe = new RegExp('(<\\/?)' + rep.from + ':', 'g');
+      xml = xml.replace(tagRe, '$1' + rep.to + ':');
+      const attrRe = new RegExp('(\\s)' + rep.from + ':', 'g');
+      xml = xml.replace(attrRe, '$1' + rep.to + ':');
+    }
+
+    // 4) Remove duplicate namespace declarations on the same element.
+    //    Some serializers produce xmlns:w="..." twice on the root element.
+    xml = xml.replace(/<[^>]+>/g, function(tag) {
+      const seen = {};
+      return tag.replace(/ xmlns(:\w+)?="[^"]*"/g, function(m) {
+        if (seen[m]) return '';
+        seen[m] = true;
+        return m;
+      });
+    });
+
+    // 5) Fix self-closing tags that Word requires to have explicit close tags.
+    //    OOXML elements like <w:t/>, <w:instrText/>, <w:delText/> must be
+    //    <w:t></w:t> etc. — Word treats self-closing versions as corrupt.
+    var selfCloseElements = ['w:t', 'w:instrText', 'w:delText', 'w:tab',
+      'w:br', 'w:cr', 'w:noBreakHyphen', 'w:softHyphen'];
+    for (var sci = 0; sci < selfCloseElements.length; sci++) {
+      var scTag = selfCloseElements[sci];
+      // Match <w:t/> or <w:t xml:space="preserve"/> etc
+      var scRe = new RegExp('<(' + scTag.replace(':', '\\:') + ')((?:\\s[^>]*)?)\\s*/>', 'g');
+      xml = xml.replace(scRe, '<$1$2></' + scTag + '>');
+    }
+
+    // 6) Validate: re-parse to catch any corruption early
     try {
       const testDoc = new DOMParser().parseFromString(xml, 'application/xml');
       const errNode = testDoc.getElementsByTagName('parsererror')[0];
       if (errNode) {
-        // Log but don't throw — return original XML, Word might still handle it
         if (typeof console !== 'undefined') {
           console.warn('sanitizeSerializedXml: re-parse detected error:', (errNode.textContent || '').slice(0, 200));
         }
       }
     } catch (e) { /* swallow — validation is best-effort */ }
+
+    return xml;
+  }
+
+  /**
+   * Sanitize .rels files specifically. These use a different namespace
+   * (http://schemas.openxmlformats.org/package/2006/relationships) and
+   * must NOT go through the main sanitizer which may corrupt their namespaces.
+   */
+  function sanitizeRelsXml(xml) {
+    // 1) Ensure XML declaration
+    if (!xml.startsWith('<?xml')) {
+      xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' + xml;
+    }
+
+    // 2) Remove empty namespace bindings
+    xml = xml.replace(/ xmlns:\w+=""/g, '');
+
+    // 3) Fix nsN: prefix pollution for the rels namespace
+    var relsNs = 'http://schemas.openxmlformats.org/package/2006/relationships';
+    var nsNRels = /xmlns:(ns\d+)="http:\/\/schemas\.openxmlformats\.org\/package\/2006\/relationships"/g;
+    var relsMatch;
+    while ((relsMatch = nsNRels.exec(xml)) !== null) {
+      var synPre = relsMatch[1];
+      // Remove the xmlns:nsN declaration (default ns is used, no prefix)
+      xml = xml.split('xmlns:' + synPre + '="' + relsNs + '"').join('xmlns="' + relsNs + '"');
+      // Replace nsN: prefixed tags with unprefixed
+      var rTagRe = new RegExp('(<\\/?)' + synPre + ':', 'g');
+      xml = xml.replace(rTagRe, '$1');
+    }
+
+    // 4) Remove duplicate namespace declarations
+    xml = xml.replace(/<[^>]+>/g, function(tag) {
+      var seen = {};
+      return tag.replace(/ xmlns(:\w+)?="[^"]*"/g, function(m) {
+        if (seen[m]) return '';
+        seen[m] = true;
+        return m;
+      });
+    });
+
+    return xml;
+  }
+
+  /**
+   * Ensure the root <w:document> element in document.xml has all required
+   * OOXML namespace declarations. Word may report corruption if any
+   * namespace used in the body is not declared on the root element.
+   */
+  function ensureDocumentNamespaces(xml) {
+    var requiredNs = [
+      ['xmlns:wpc', 'http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas'],
+      ['xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006'],
+      ['xmlns:o', 'urn:schemas-microsoft-com:office:office'],
+      ['xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'],
+      ['xmlns:m', 'http://schemas.openxmlformats.org/officeDocument/2006/math'],
+      ['xmlns:v', 'urn:schemas-microsoft-com:vml'],
+      ['xmlns:wp14', 'http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing'],
+      ['xmlns:wp', 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'],
+      ['xmlns:w10', 'urn:schemas-microsoft-com:office:word'],
+      ['xmlns:w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'],
+      ['xmlns:w14', 'http://schemas.microsoft.com/office/word/2010/wordml'],
+      ['xmlns:wpg', 'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup'],
+      ['xmlns:wpi', 'http://schemas.microsoft.com/office/word/2010/wordprocessingInk'],
+      ['xmlns:wne', 'http://schemas.microsoft.com/office/word/2006/wordml'],
+      ['xmlns:wps', 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape'],
+      ['xmlns:a', 'http://schemas.openxmlformats.org/drawingml/2006/main'],
+    ];
+
+    // Find the opening <w:document ...> tag
+    var docTagMatch = xml.match(/<w:document\b[^>]*>/);
+    if (!docTagMatch) return xml;
+
+    var docTag = docTagMatch[0];
+    var additions = '';
+    for (var i = 0; i < requiredNs.length; i++) {
+      var attr = requiredNs[i][0];
+      var uri = requiredNs[i][1];
+      // Check if this namespace is already declared (with any URI)
+      if (docTag.indexOf(attr + '=') === -1) {
+        additions += ' ' + attr + '="' + uri + '"';
+      }
+    }
+
+    // Ensure mc:Ignorable attribute includes all extension namespaces
+    // Word requires this to tolerate w14, wp14, w15 etc. elements
+    if (docTag.indexOf('mc:Ignorable') === -1) {
+      additions += ' mc:Ignorable="w14 wp14 wpc wpg wpi wps"';
+    }
+
+    if (additions) {
+      // Insert before the closing > of the <w:document> tag
+      var newTag = docTag.replace(/>$/, additions + '>');
+      xml = xml.replace(docTag, newTag);
+    }
 
     return xml;
   }
@@ -2990,14 +3153,57 @@
   }
 
   function dedupeBookmarksDom(doc) {
-    const seen = new Set();
+    // 1) Deduplicate bookmarkEnd elements
+    const seenEnds = new Set();
     const ends = Array.from(doc.getElementsByTagName('w:bookmarkEnd'));
     for (const e of ends) {
       const id = e.getAttribute('w:id');
-      if (seen.has(id)) {
+      if (seenEnds.has(id)) {
         if (e.parentNode) e.parentNode.removeChild(e);
       } else {
-        seen.add(id);
+        seenEnds.add(id);
+      }
+    }
+
+    // 2) Deduplicate bookmarkStart elements
+    const seenStarts = new Set();
+    const starts = Array.from(doc.getElementsByTagName('w:bookmarkStart'));
+    for (const s of starts) {
+      const id = s.getAttribute('w:id');
+      if (seenStarts.has(id)) {
+        if (s.parentNode) s.parentNode.removeChild(s);
+      } else {
+        seenStarts.add(id);
+      }
+    }
+
+    // 3) Remove orphaned bookmarkEnd (no matching bookmarkStart)
+    const startIds = new Set();
+    const allStarts = Array.from(doc.getElementsByTagName('w:bookmarkStart'));
+    for (const s of allStarts) {
+      const id = s.getAttribute('w:id');
+      if (id !== null) startIds.add(id);
+    }
+    const allEnds = Array.from(doc.getElementsByTagName('w:bookmarkEnd'));
+    for (const e of allEnds) {
+      const id = e.getAttribute('w:id');
+      if (id !== null && !startIds.has(id)) {
+        if (e.parentNode) e.parentNode.removeChild(e);
+      }
+    }
+
+    // 4) Remove orphaned bookmarkStart (no matching bookmarkEnd)
+    const endIds = new Set();
+    const remainingEnds = Array.from(doc.getElementsByTagName('w:bookmarkEnd'));
+    for (const e of remainingEnds) {
+      const id = e.getAttribute('w:id');
+      if (id !== null) endIds.add(id);
+    }
+    const remainingStarts = Array.from(doc.getElementsByTagName('w:bookmarkStart'));
+    for (const s of remainingStarts) {
+      const id = s.getAttribute('w:id');
+      if (id !== null && !endIds.has(id)) {
+        if (s.parentNode) s.parentNode.removeChild(s);
       }
     }
   }
